@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "AI-powered data analysis tool for product managers",
   "main": "dist-main/main/index.js",
-  "author": "Terry <terry@ioty.io>",
+  "author": "Terry",
   "license": "MIT",
   "scripts": {
     "dev": "npm run dev:renderer & npm run dev:main",
