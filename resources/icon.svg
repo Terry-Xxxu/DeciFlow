@@ -1,29 +1,28 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <!-- Background - Solid Indigo -->
-  <rect width="512" height="512" rx="115" fill="#6366F1"/>
+  <!-- Background - White -->
+  <rect width="512" height="512" rx="115" fill="#ffffff"/>
 
-  <!-- Centered Data/Chart Icon -->
-  <g transform="translate(156, 156)">
-    <!-- Bar Chart Icon -->
-    <!-- Bar 1 -->
-    <rect x="20" y="80" width="40" height="100" rx="8" fill="#ffffff" opacity="0.9"/>
+  <!-- Four squares pattern - larger, more spacing, thicker lines -->
+  <!-- Square size: 110x110, Gap: 48px, Total: 268px -->
+  <!-- Starting position: (512-268)/2 = 122px -->
+  <g transform="translate(122, 122)">
+    <!-- Top left - solid square -->
+    <rect x="0" y="0" width="110" height="110" rx="26" fill="#0a0a0a"/>
 
-    <!-- Bar 2 -->
-    <rect x="80" y="40" width="40" height="140" rx="8" fill="#ffffff" opacity="0.95"/>
+    <!-- Top right - outline square -->
+    <rect x="158" y="0" width="110" height="110" rx="26" stroke="#0a0a0a" stroke-width="8" fill="none"/>
 
-    <!-- Bar 3 -->
-    <rect x="140" y="60" width="40" height="120" rx="8" fill="#ffffff"/>
+    <!-- Bottom left - outline square -->
+    <rect x="0" y="158" width="110" height="110" rx="26" stroke="#0a0a0a" stroke-width="8" fill="none"/>
 
-    <!-- Trend Line -->
-    <path d="M10 110 Q90 30 170 70"
-          stroke="#06B6D4"
-          stroke-width="8"
+    <!-- Bottom right - solid square -->
+    <rect x="158" y="158" width="110" height="110" rx="26" fill="#0a0a0a"/>
+
+    <!-- Flow connection lines - dashed, thicker -->
+    <path d="M110 55L158 55M110 213L158 213M55 110L55 158M213 110L213 158"
+          stroke="#0a0a0a"
+          stroke-width="6"
           stroke-linecap="round"
-          fill="none"/>
-
-    <!-- Data Point on Trend -->
-    <circle cx="40" cy="100" r="8" fill="#06B6D4"/>
-    <circle cx="90" cy="55" r="8" fill="#06B6D4"/>
-    <circle cx="140" cy="70" r="8" fill="#06B6D4"/>
+          stroke-dasharray="8 8"/>
   </g>
 </svg>
