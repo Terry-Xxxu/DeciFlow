@@ -26,52 +26,31 @@
 
 ---
 
-## 🖼️ 界面预览
-
-### 主界面
-![Dashboard](screenshots/dashboard.png)
-
-### AI 分析
-![AI Analysis](screenshots/analysis.png)
-
-### 数据可视化
-![Charts](screenshots/charts.png)
-
 ---
 
 ## 📥 下载安装
 
 > **🎯 快速下载：访问 [Releases 页面](https://github.com/Terry-iotex/data-insight-pro/releases) 获取最新版本**
 
-### 🍎 macOS
-
-**支持 macOS 10.15+ (Intel & Apple Silicon M1/M2/M3)**
-
-| 文件 | 说明 | 下载 |
-|------|------|------|
-| `DeciFlow-1.0.0-universal.dmg` | 通用安装包（推荐） | [下载](https://github.com/Terry-iotex/data-insight-pro/releases/latest) |
-
-**安装步骤：**
-1. 下载 `.dmg` 文件
-2. 双击打开，将 DeciFlow 拖入「应用程序」文件夹
-3. 首次打开时，右键点击 → 选择「打开」（绕过 Gatekeeper）
-
-**⚠️ 提示**：如果遇到「无法验证开发者」错误，请在系统偏好设置 → 安全性与隐私中点击「仍要打开」
-
----
-
 ### 🪟 Windows
 
 **支持 Windows 10/11 (64 位)**
 
-| 文件 | 说明 | 下载 |
-|------|------|------|
-| `DeciFlow-Setup-1.0.0.exe` | 安装程序（推荐） | [下载](https://github.com/Terry-iotex/data-insight-pro/releases/latest) |
+1. 下载 `DeciFlow-Windows-1.0.0.zip`
+2. 解压到任意目录
+3. 双击运行 `DeciFlow.exe`
 
-**安装步骤：**
-1. 下载 `.exe` 安装程序
-2. 运行安装程序，按提示完成安装
-3. 从桌面快捷方式或开始菜单启动 DeciFlow
+### 🐧 Linux
+
+**支持 Linux x64**
+
+1. 下载 `DeciFlow-Linux-1.0.0.tar.gz`
+2. 解压：`tar -xzf DeciFlow-Linux-1.0.0.tar.gz`
+3. 运行：`cd linux-unpacked && ./deciflow`
+
+### 🍎 macOS
+
+**即将推出，敬请期待...**
 
 ---
 
