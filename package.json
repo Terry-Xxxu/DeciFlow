@@ -153,6 +153,7 @@
     "eslint-plugin-react": "^7.37.5",
     "postcss": "^8.5.9",
     "postcss-nesting": "^14.0.0",
+    "puppeteer": "^24.40.0",
     "sharp": "^0.34.5",
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.2.0",

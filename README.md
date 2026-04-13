@@ -1,30 +1,69 @@
 <div align="center">
 
-![DeciFlow Logo](resources/icon-512x512.png)
+![DeciFlow Logo](resources/icon-256x256.png)
 
 # DeciFlow
 
 **AI 驱动的数据分析工具，让数据洞察触手可及**
 
-[![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](https://github.com/Terry-Xxxu/deciflow-src)
-[![Electron](https://img.shields.io/badge/Electron-41-9FEAF9)](https://www.electronjs.org/)
-[![React](https://img.shields.io/badge/React-19-61DAFB)](https://react.dev/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6)](https://www.typescriptlang.org/)
+[![License: Proprietary](https://img.shields.io/badge/License-Proprietary-red.svg)](https://github.com/Terry-Xxxu/data-insight-pro)
+[![Electron](https://img.shields.io/badge/Electron-41-9FEAF9?logo=electron)](https://www.electronjs.org/)
+[![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)](https://react.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript)](https://www.typescriptlang.org/)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)](https://github.com/Terry-Xxxu/data-insight-pro/releases)
+
+[首页](https://datainsight.pro) · [文档](https://docs.datainsight.pro) · [下载](https://github.com/Terry-Xxxu/data-insight-pro/releases) · [反馈](https://github.com/Terry-Xxxu/data-insight-pro/issues)
+
+---
 
 </div>
 
+## ✨ 产品演示
+
+### 界面预览
+
+| 主界面 | 数据源管理 | 智能查询 |
+|:---:|:---:|:---:|
+| ![Dashboard](docs/screenshots/dashboard.png) | ![Database](docs/screenshots/database.png) | ![Query](docs/screenshots/query.png) |
+
+| 数据可视化 | 查询历史 | 数据字典 |
+|:---:|:---:|:---:|
+| ![Charts](docs/screenshots/charts.png) | ![History](docs/screenshots/history.png) | ![Dictionary](docs/screenshots/dictionary.png) |
+
 ---
 
-## ✨ 功能特性
+## 🚀 核心功能
 
-- **🤖 AI 智能分析** - 自然语言查询，自动生成 SQL，智能洞察发现
-- **📊 丰富可视化** - 多种图表类型，一键切换，拖拽交互
-- **🔌 多数据源支持** - PostgreSQL、MySQL、MongoDB 一键连接
-- **📖 数据字典** - 统一管理业务指标和字段定义
-- **🔒 安全可靠** - SQL 注入防护，数据脱敏，审计日志
-- **🎨 精美设计** - 深色/浅色主题，响应式布局，流畅动画
+### 🤖 AI 智能分析
+- **自然语言查询** - 用中文提问，自动生成 SQL
+- **智能洞察发现** - 自动识别数据中的模式和异常
+- **上下文理解** - 记住查询历史，提供智能建议
 
----
+### 📊 丰富可视化
+- **多种图表类型** - 折线图、柱状图、饼图、面积图、漏斗图、热力图
+- **拖拽交互** - 自由调整布局，定制仪表板
+- **一键切换** - 在不同图表类型间快速切换
+- **导出分享** - 导出为 CSV、JSON 或图片
+
+### 🔌 多数据源支持
+- **PostgreSQL** - 企业级关系数据库
+- **MySQL** - 最流行的开源数据库
+- **MongoDB** - 灵活的 NoSQL 数据库
+
+### 📖 数据字典
+- **统一管理** - 集中管理业务指标和字段定义
+- **智能推荐** - 基于字典优化查询建议
+- **团队协作** - 共享数据定义，统一口径
+
+### 🔒 安全可靠
+- **SQL 注入防护** - 自动检测和拦截恶意查询
+- **数据脱敏** - 敏感字段自动掩码处理
+- **审计日志** - 完整记录查询历史
+
+### 🎨 精美设计
+- **深色/浅色主题** - 自由切换，护眼舒适
+- **响应式布局** - 自适应各种屏幕尺寸
+- **流畅动画** - 丝滑的交互体验
 
 ---
 
@@ -54,9 +93,9 @@
 
 ---
 
-## 🚀 快速开始
+## 🎯 快速开始
 
-### 1. 连接数据源
+### 第一步：连接数据源
 
 首次使用时，需要连接你的数据库：
 
@@ -66,7 +105,7 @@
 4. 点击「测试连接」
 5. 连接成功后点击「保存」
 
-### 2. 开始查询
+### 第二步：开始查询
 
 在首页输入框中输入自然语言查询：
 
@@ -76,7 +115,7 @@
 "找出销售额下降的原因"
 ```
 
-### 3. 探索洞察
+### 第三步：探索洞察
 
 - **AI 洞察** - 自动发现数据中的模式和异常
 - **可视化** - 一键生成图表，支持拖拽调整
@@ -90,19 +129,25 @@
 
 ---
 
-## 🔒 源代码
+## 🛠️ 技术栈
 
-DeciFlow 的源代码托管在私有仓库中。
+| 类别 | 技术 |
+|:---:|:---|
+| **前端** | React 19 · TypeScript · Tailwind CSS |
+| **桌面** | Electron 41 |
+| **图表** | Recharts |
+| **构建** | Vite · electron-builder |
+| **AI** | OpenAI / Claude / Gemini (可选) |
 
 ---
 
-## 🛠️ 技术栈
+## 🗺️ 开发路线图
 
-- **前端**: React 19 + TypeScript + Tailwind CSS
-- **桌面**: Electron 41
-- **图表**: Recharts
-- **构建**: Vite + electron-builder
-- **AI**: OpenAI / Claude / Gemini (可选)
+- [x] v1.0 - 基础功能（数据源连接、SQL 查询）
+- [x] v1.5 - 图表编辑器、表浏览器
+- [ ] v1.6 - AI 智能分析
+- [ ] v2.0 - 协作功能、权限管理
+- [ ] v2.1 - 移动端支持
 
 ---
 
@@ -114,10 +159,13 @@ Proprietary - © 2025 Terry
 
 ## 🙏 致谢
 
-- [Electron](https://www.electronjs.org/)
-- [React](https://react.dev/)
-- [Recharts](https://recharts.org/)
-- [Lucide Icons](https://lucide.dev/)
+感谢以下开源项目：
+
+- [Electron](https://www.electronjs.org/) - 跨平台桌面应用框架
+- [React](https://react.dev/) - 用户界面库
+- [Recharts](https://recharts.org/) - 图表库
+- [Lucide Icons](https://lucide.dev/) - 图标库
+- [Tailwind CSS](https://tailwindcss.com/) - CSS 框架
 
 ---
 
