@@ -18,18 +18,6 @@
 
 </div>
 
-## ✨ 产品演示
-
-### 界面预览
-
-| 主界面 | 数据源管理 | 智能查询 |
-|:---:|:---:|:---:|
-| ![Dashboard](docs/screenshots/dashboard.png) | ![Database](docs/screenshots/database.png) | ![Query](docs/screenshots/query.png) |
-
-| 数据可视化 | 查询历史 | 数据字典 |
-|:---:|:---:|:---:|
-| ![Charts](docs/screenshots/charts.png) | ![History](docs/screenshots/history.png) | ![Dictionary](docs/screenshots/dictionary.png) |
-
 ---
 
 ## 🚀 核心功能
