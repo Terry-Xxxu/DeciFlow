@@ -1,6 +1,4 @@
-
-
-import { Button } from "@/components/ui/button"
+import { Button } from "../ui/button"
 import { Clock, Play, MoreHorizontal, CheckCircle2 } from "lucide-react"
 
 const recentQueries = [

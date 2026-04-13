@@ -1,6 +1,4 @@
-
-
-import { cn } from "@/lib/utils"
+import { cn } from "../../lib/utils"
 import { Users, TrendingUp, Repeat, DollarSign, ArrowRight } from "lucide-react"
 
 const actions = [

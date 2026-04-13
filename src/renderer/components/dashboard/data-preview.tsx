@@ -1,8 +1,6 @@
-
-
-import { Button } from "@/components/ui/button"
+import { Button } from "../ui/button"
 import { Table, Download, Eye, Code2, TrendingUp, TrendingDown } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn } from "../../lib/utils"
 
 const tableData = [
   { date: "2024-01", users: 12345, retention: 68.5, trend: "up", change: "+5.2%" },

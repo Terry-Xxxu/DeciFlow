@@ -1,8 +1,8 @@
 import React, { useState } from "react"
-import { PageLayout } from "@/components/dashboard/page-layout"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
+import { PageLayout } from "../components/dashboard/page-layout"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card"
+import { Button } from "../components/ui/button"
+import { Textarea } from "../components/ui/textarea"
 import {
   Sparkles,
   TrendingUp,
@@ -16,7 +16,7 @@ import {
   Zap,
   RefreshCw,
 } from "lucide-react"
-import { EmptyState } from "@/components/dashboard/empty-states"
+import { EmptyState } from "../components/dashboard/empty-states"
 
 interface AnalysisPageProps {
   onNavigate?: (page: string) => void

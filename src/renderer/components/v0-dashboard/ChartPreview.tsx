@@ -51,6 +51,8 @@ export function ChartPreview() {
     }, 2000)
     showToast("链接已复制到剪贴板", "success")
   }
+
+  return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-border px-5 py-4">

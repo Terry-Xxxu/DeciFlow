@@ -1,7 +1,7 @@
 import React, { useState } from "react"
-import { Button } from "@/components/ui/button"
+import { Button } from "../ui/button"
 import { Sparkles, Send, FileText, ChevronRight } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn } from "../../lib/utils"
 
 const suggestions = [
   "最近7天的日活用户趋势",

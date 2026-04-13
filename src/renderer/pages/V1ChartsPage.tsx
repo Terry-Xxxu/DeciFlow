@@ -1,10 +1,8 @@
-"use client"
-
 import { useState } from "react"
-import { PageLayout } from "@/components/dashboard/page-layout"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { EmptyState } from "@/components/dashboard/empty-states"
+import { PageLayout } from "../components/dashboard/page-layout"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card"
+import { Button } from "../components/ui/button"
+import { EmptyState } from "../components/dashboard/empty-states"
 import {
   BarChart3,
   LineChart,
@@ -72,12 +70,16 @@ const chartTemplates = [
   { icon: TrendingUp, title: "面积图", description: "强调累计趋势" },
 ]
 
-export default function ChartsPage() {
+interface ChartsPageProps {
+  onNavigate?: (page: string) => void
+}
+
+export function V1ChartsPage({ onNavigate }: ChartsPageProps) {
   const [hasData] = useState(true) // Toggle to test empty state
 
   if (!hasData) {
     return (
-      <PageLayout>
+      <PageLayout currentPage="charts" onNavigate={onNavigate}>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-1">
             <h1 className="text-xl font-bold tracking-tight text-foreground md:text-2xl">

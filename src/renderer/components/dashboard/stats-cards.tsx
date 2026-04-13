@@ -1,7 +1,5 @@
-
-
 import { Users, TrendingUp, Activity, DollarSign } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn } from "../../lib/utils"
 
 const stats = [
   {

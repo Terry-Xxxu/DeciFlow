@@ -1,6 +1,4 @@
-
-
-import { Button } from "@/components/ui/button"
+import { Button } from "../ui/button"
 import { BarChart3, LineChart, PieChart, Download } from "lucide-react"
 import {
   AreaChart,

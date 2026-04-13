@@ -1,8 +1,6 @@
-
-
-import { Button } from "@/components/ui/button"
+import { Button } from "../ui/button"
 import { Sparkles, TrendingUp, AlertTriangle, Lightbulb, ArrowRight } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn } from "../../lib/utils"
 
 const insights = [
   {

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react"
-import { Button } from "@/components/ui/button"
+import { Button } from "../ui/button"
 import { Bell, Moon, Sun, Zap, Menu } from "lucide-react"
-import { useTheme } from "@/contexts/ThemeContext"
+import { useTheme } from "../../contexts/ThemeContext"
 
 interface HeaderProps {
   onMenuClick?: () => void

@@ -1,6 +1,4 @@
-
-
-import { Button } from "@/components/ui/button"
+import { Button } from "../ui/button"
 import {
   Database,
   Search,
@@ -10,11 +8,12 @@ import {
   ArrowRight,
   FileText,
   Zap,
+  Clock,
 } from "lucide-react"
-import { cn } from "@/lib/utils"
+import { cn } from "../../lib/utils"
 
 interface EmptyStateProps {
-  type: "no-data" | "no-charts" | "no-queries" | "no-insights" | "no-datasource"
+  type: "no-data" | "no-charts" | "no-queries" | "no-insights" | "no-datasource" | "no-datasources" | "no-history" | "no-dictionary"
   onAction?: () => void
   className?: string
 }
@@ -54,6 +53,27 @@ const emptyStates = {
     description: "支持 PostgreSQL、MySQL、ClickHouse 等多种数据库",
     action: "添加数据源",
     secondaryAction: "导入文件",
+  },
+  "no-datasources": {
+    icon: FileText,
+    title: "添加数据源",
+    description: "支持 PostgreSQL、MySQL、ClickHouse 等多种数据库",
+    action: "添加数据源",
+    secondaryAction: "导入文件",
+  },
+  "no-history": {
+    icon: Clock,
+    title: "暂无查询历史",
+    description: "您的历史查询记录将显示在这里",
+    action: "开始查询",
+    secondaryAction: "查看帮助",
+  },
+  "no-dictionary": {
+    icon: Database,
+    title: "数据字典为空",
+    description: "添加业务指标和字段定义，方便团队协作",
+    action: "添加指标",
+    secondaryAction: "导入字典",
   },
 }
 
