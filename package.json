@@ -7,8 +7,8 @@
   "license": "MIT",
   "scripts": {
     "dev": "npm run dev:renderer & npm run dev:main",
-    "dev:renderer": "vite --port 5173 --strictPort",
-    "dev:main": "tsc -p tsconfig.main.json && electron .",
+    "dev:renderer": "vite --port 5173 --strictPort --host",
+    "dev:main": "tsc -p tsconfig.main.json && electron . --no-sandbox",
     "build": "npm run build:renderer && npm run build:main",
     "build:renderer": "vite build",
     "build:main": "tsc -p tsconfig.main.json",
@@ -19,7 +19,10 @@
     "dist:win": "npm run build && electron-builder --win",
     "dist:mas": "npm run build && electron-builder --mac mas",
     "dist:mas-dev": "npm run build && electron-builder --mac mas-dev",
-    "notarize": "node scripts/notarize.js"
+    "notarize": "node scripts/notarize.js",
+    "test": "tsx scripts/run-tests.ts",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "build": {
     "appId": "com.datainsight.pro",

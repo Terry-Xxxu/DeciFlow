@@ -27,9 +27,3 @@ npm-debug.log*
 # Electron
 out/
 
-# 源代码已移至私有仓库
-/src/
-/scripts/
-/tsconfig*.json
-/vite.config.ts
-/postcss.config.js

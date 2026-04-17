@@ -1,0 +1,621 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  /* DeciFlow v0 Light Mode - OKLCH Color System */
+  --background: oklch(0.985 0.002 240);
+  --foreground: oklch(0.15 0.01 250);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.15 0.01 250);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.15 0.01 250);
+  --primary: oklch(0.55 0.2 255);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.96 0.005 250);
+  --secondary-foreground: oklch(0.25 0.01 250);
+  --muted: oklch(0.95 0.005 250);
+  --muted-foreground: oklch(0.45 0.02 250);
+  --accent: oklch(0.65 0.18 280);
+  --accent-foreground: oklch(1 0 0);
+  --destructive: oklch(0.55 0.22 25);
+  --destructive-foreground: oklch(1 0 0);
+  --border: oklch(0.9 0.01 250);
+  --input: oklch(0.92 0.01 250);
+  --ring: oklch(0.55 0.2 255);
+  --chart-1: oklch(0.55 0.2 255);
+  --chart-2: oklch(0.65 0.18 280);
+  --chart-3: oklch(0.7 0.18 160);
+  --chart-4: oklch(0.75 0.15 80);
+  --chart-5: oklch(0.6 0.2 30);
+  --radius: 0.75rem;
+  --sidebar: oklch(0.99 0.002 250);
+  --sidebar-foreground: oklch(0.15 0.01 250);
+  --sidebar-primary: oklch(0.55 0.2 255);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.96 0.01 255);
+  --sidebar-accent-foreground: oklch(0.25 0.01 250);
+  --sidebar-border: oklch(0.92 0.01 250);
+  --sidebar-ring: oklch(0.55 0.2 255);
+}
+
+.dark {
+  /* DeciFlow v0 Dark Mode - OKLCH Color System */
+  --background: oklch(0.1 0.015 260);
+  --foreground: oklch(0.95 0.005 250);
+  --card: oklch(0.21 0.012 260);
+  --card-foreground: oklch(0.95 0.005 250);
+  --popover: oklch(0.21 0.012 260);
+  --popover-foreground: oklch(0.95 0.005 250);
+  --primary: oklch(0.6 0.2 255);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.26 0.02 260);
+  --secondary-foreground: oklch(0.95 0.005 250);
+  --muted: oklch(0.26 0.015 260);
+  --muted-foreground: oklch(0.6 0.02 250);
+  --accent: oklch(0.6 0.18 280);
+  --accent-foreground: oklch(1 0 0);
+  --destructive: oklch(0.5 0.2 25);
+  --destructive-foreground: oklch(1 0 0);
+  --border: oklch(0.18 0.015 260);
+  --input: oklch(0.18 0.015 260);
+  --ring: oklch(0.6 0.2 255);
+  --chart-1: oklch(0.6 0.2 255);
+  --chart-2: oklch(0.6 0.18 280);
+  --chart-3: oklch(0.7 0.18 160);
+  --chart-4: oklch(0.75 0.15 80);
+  --chart-5: oklch(0.6 0.2 30);
+  --sidebar: oklch(0.15 0.012 260);
+  --sidebar-foreground: oklch(0.95 0.005 250);
+  --sidebar-primary: oklch(0.6 0.2 255);
+  --sidebar-primary-foreground: oklch(1 0 0);
+  --sidebar-accent: oklch(0.18 0.02 260);
+  --sidebar-accent-foreground: oklch(0.95 0.005 250);
+  --sidebar-border: oklch(0.18 0.015 260);
+  --sidebar-ring: oklch(0.6 0.2 255);
+}
+
+@theme inline {
+  --font-sans: 'Inter', 'Geist', 'Geist Fallback', -apple-system, BlinkMacSystemFont, 'system-ui', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Geist Mono', 'Geist Mono Fallback', 'SF Mono', 'Monaco', 'Cascadia Code', 'Roboto Mono', monospace;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Typography */
+  h1, h2, h3, h4, h5, h6 {
+    letter-spacing: -0.025em;
+  }
+
+  h1 {
+    font-size: 1.5rem;
+    font-weight: 700;
+  }
+
+  h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+  }
+
+  h3 {
+    font-size: 1.125rem;
+    font-weight: 600;
+  }
+}
+
+@layer utilities {
+  /* Ultra-modern minimal scrollbar */
+  .custom-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 3px;
+    height: 3px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 2px;
+  }
+
+  .custom-scrollbar:hover::-webkit-scrollbar-thumb {
+    background: oklch(var(--color-muted-foreground) / 0.2);
+  }
+
+  /* Dropdown specific scrollbar - even more minimal */
+  .dropdown-scroll::-webkit-scrollbar {
+    width: 3px;
+  }
+
+  .dropdown-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .dropdown-scroll::-webkit-scrollbar-thumb {
+    background: oklch(var(--color-muted-foreground) / 0.1);
+    border-radius: 2px;
+  }
+
+  .dropdown-scroll::-webkit-scrollbar-thumb:hover {
+    background: oklch(var(--color-muted-foreground) / 0.2);
+  }
+
+  /* Hide native select and prepare for custom dropdown */
+  .native-select-hidden {
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+  }
+
+  /* Remove focus outlines and borders from form elements */
+  input:focus,
+  input:focus-visible,
+  textarea:focus,
+  textarea:focus-visible {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
+  .dark input,
+  .dark select,
+  .dark textarea {
+    box-shadow: none !important;
+  }
+
+  /* Select dropdown styling fix for dark mode */
+  select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3e%3cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3e%3c/svg%3e");
+    background-position: right 0.5rem center;
+    background-repeat: no-repeat;
+    background-size: 1.5em 1.5em;
+    padding-right: 2.5rem;
+  }
+
+  /* Remove all focus outlines and borders from select */
+  select:focus,
+  select:focus-visible,
+  select:focus-within {
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
+  /* Fix select option borders in dark mode */
+  .dark select option {
+    background-color: oklch(var(--color-card) / 1);
+    color: oklch(var(--color-foreground) / 1);
+    border: none !important;
+    outline: none !important;
+  }
+
+  /* Light mode option styling */
+  select option {
+    background-color: hsl(var(--card));
+    color: hsl(var(--foreground));
+    border: none;
+  }
+
+  select option:hover,
+  select option:focus,
+  select option:checked {
+    background-color: hsl(var(--primary) / 0.2) !important;
+    color: hsl(var(--foreground)) !important;
+    border: none !important;
+  }
+
+  /* Remove white border in dark mode for select */
+  .dark select:focus,
+  .dark select:focus-visible {
+    border-color: hsl(var(--primary)) !important;
+  }
+
+  /* Gradient text */
+  .gradient-text {
+    @apply bg-gradient-to-r from-primary to-accent;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Shimmer animation */
+  @keyframes shimmer {
+    0% {
+      background-position: -1000px 0;
+    }
+    100% {
+      background-position: 1000px 0;
+    }
+  }
+
+  .shimmer {
+    animation: shimmer 2s infinite;
+    background: linear-gradient(
+      to right,
+      hsl(var(--muted) / 0.5) 0%,
+      hsl(var(--muted) / 1) 50%,
+      hsl(var(--muted) / 0.5) 100%
+    );
+    background-size: 1000px 100%;
+  }
+
+  /* Fade in animation */
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .fade-in {
+    animation: fade-in 0.3s ease-out;
+  }
+
+  /* Slide in from right */
+  @keyframes slide-in-right {
+    from {
+      transform: translateX(100%);
+    }
+    to {
+      transform: translateX(0);
+    }
+  }
+
+  .slide-in-right {
+    animation: slide-in-right 0.3s ease-out;
+  }
+
+  /* Pulse glow effect */
+  @keyframes pulse-glow {
+    0%, 100% {
+      box-shadow: 0 0 0 0 hsl(var(--primary) / 0.4);
+    }
+    50% {
+      box-shadow: 0 0 0 8px hsl(var(--primary) / 0);
+    }
+  }
+
+  .pulse-glow {
+    animation: pulse-glow 2s infinite;
+  }
+
+  /* Dark mode card enhancement */
+  .dark .card-elevated {
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4),
+                0 0 0 1px rgba(255, 255, 255, 0.05);
+  }
+
+  /* ========== 高级动画效果 ========== */
+
+  /* 1. 悬停提升效果 */
+  .hover-lift {
+    transition: transform 200ms ease-out, box-shadow 200ms ease-out;
+  }
+  .hover-lift:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 30px -10px rgba(0, 0, 0, 0.3);
+  }
+
+  /* 2. 悬停发光效果 */
+  .hover-glow {
+    transition: box-shadow 200ms ease-out;
+  }
+  .hover-glow:hover {
+    box-shadow: 0 0 20px hsl(var(--primary) / 0.4);
+  }
+
+  /* 3. 悬停缩放效果 */
+  .hover-scale {
+    transition: transform 200ms ease-out;
+  }
+  .hover-scale:hover {
+    transform: scale(1.02);
+  }
+
+  /* 4. 悬停内部元素效果 */
+  .hover-expand {
+    transition: all 200ms ease-out;
+  }
+  .hover-expand:hover {
+    padding-left: 1.5rem;
+    padding-right: 1.5rem;
+  }
+
+  /* 5. 渐变背景动画 */
+  @keyframes gradient-shift {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
+
+  .animate-gradient-bg {
+    background-size: 200% 200%;
+    animation: gradient-shift 3s ease infinite;
+  }
+
+  /* 6. 微弱脉动效果 */
+  @keyframes pulse-subtle {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.8; }
+  }
+
+  .animate-pulse-subtle {
+    animation: pulse-subtle 2s ease-in-out infinite;
+  }
+
+  /* 7. 呼吸动画 */
+  @keyframes breathe {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.03); }
+  }
+
+  .animate-breathe {
+    animation: breathe 4s ease-in-out infinite;
+  }
+
+  /* 8. 摇晃动画 */
+  @keyframes wiggle {
+    0%, 100% { transform: rotate(-3deg); }
+    50% { transform: rotate(3deg); }
+  }
+
+  .animate-wiggle {
+    animation: wiggle 300ms ease-in-out;
+  }
+
+  /* 9. 弹跳进入 */
+  @keyframes bounce-in {
+    0% { transform: scale(0.9); opacity: 0; }
+    50% { transform: scale(1.02); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+
+  .animate-bounce-in {
+    animation: bounce-in 400ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  /* 10. 滑入淡入 */
+  @keyframes slide-fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-slide-fade-in {
+    animation: slide-fade-in 300ms ease-out forwards;
+  }
+
+  /* 11. 延迟动画（用于列表项） */
+  .delay-100 { animation-delay: 100ms; }
+  .delay-200 { animation-delay: 200ms; }
+  .delay-300 { animation-delay: 300ms; }
+  .delay-400 { animation-delay: 400ms; }
+  .delay-500 { animation-delay: 500ms; }
+
+  /* 12. 加载骨架屏效果 */
+  @keyframes skeleton-loading {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+
+  .skeleton {
+    background: linear-gradient(
+      90deg,
+      hsl(var(--muted) / 0.5) 0%,
+      hsl(var(--muted) / 1) 50%,
+      hsl(var(--muted) / 0.5) 100%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-loading 1.5s infinite;
+  }
+
+  /* 13. 旋转加载 */
+  @keyframes spin-slow {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  .animate-spin-slow {
+    animation: spin-slow 3s linear infinite;
+  }
+
+  /* 14. 波纹效果 */
+  @keyframes ripple {
+    0% {
+      transform: scale(0);
+      opacity: 1;
+    }
+    100% {
+      transform: scale(4);
+      opacity: 0;
+    }
+  }
+
+  .ripple::after {
+    content: '';
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    top: 0;
+    left: 0;
+    pointer-events: none;
+    background-image: radial-gradient(circle, hsl(var(--primary) / 0.4) 10%, transparent 10.01%);
+    background-repeat: no-repeat;
+    background-position: 50%;
+    transform: scale(10);
+    opacity: 0;
+    transition: transform 0.5s, opacity 0.5s;
+  }
+
+  .ripple:active::after {
+    transform: scale(0);
+    opacity: 1;
+    transition: 0s;
+  }
+
+  /* 15. 页面过渡动画 */
+  @keyframes page-enter {
+    from {
+      opacity: 0;
+      transform: translateY(10px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  .page-transition {
+    animation: page-enter 300ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* 16. 模态框动画 */
+  @keyframes modal-backdrop {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes modal-content {
+    from {
+      opacity: 0;
+      transform: scale(0.95) translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+
+  .modal-backdrop-animate {
+    animation: modal-backdrop 200ms ease-out;
+  }
+
+  .modal-content-animate {
+    animation: modal-content 250ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+
+  /* 17. 列表项交错进入 */
+  .stagger-enter > * {
+    opacity: 0;
+    animation: slide-fade-in 300ms ease-out forwards;
+  }
+  .stagger-enter > *:nth-child(1) { animation-delay: 0ms; }
+  .stagger-enter > *:nth-child(2) { animation-delay: 50ms; }
+  .stagger-enter > *:nth-child(3) { animation-delay: 100ms; }
+  .stagger-enter > *:nth-child(4) { animation-delay: 150ms; }
+  .stagger-enter > *:nth-child(5) { animation-delay: 200ms; }
+  .stagger-enter > *:nth-child(n+6) { animation-delay: 250ms; }
+
+  /* 18. 数字滚动效果 */
+  @keyframes count-up {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .count-up {
+    display: inline-block;
+    animation: count-up 300ms ease-out;
+  }
+
+  /* 19. 状态指示器闪烁 */
+  @keyframes status-blink {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+  }
+
+  .status-blink {
+    animation: status-blink 1s ease-in-out infinite;
+  }
+
+  /* 20. 渐进式淡入 */
+  @keyframes progressive-fade {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  .progressive-fade {
+    animation: progressive-fade 500ms ease-out forwards;
+  }
+
+  /* OnboardingFlow 文字颜色 - 浅色模式 */
+  .text-text-primary {
+    color: #0F172A;
+  }
+  .text-text-secondary {
+    color: #475569;
+  }
+  .text-text-muted {
+    color: #94A3B8;
+  }
+
+  /* OnboardingFlow 文字颜色 - 深色模式 */
+  .dark .text-text-primary {
+    color: #F9FAFB;
+  }
+  .dark .text-text-secondary {
+    color: #E2E8F0;
+  }
+  .dark .text-text-muted {
+    color: #9CA3AF;
+  }
+}

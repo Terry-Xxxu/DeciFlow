@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DeciFlow - AI 数据分析工具</title>
+  <style>
+    /* 全局平滑滚动 */
+    html {
+      scroll-behavior: smooth;
+    }
+
+    /* 隐藏滚动条但保留功能 */
+    .custom-scrollbar {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+    }
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 3px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    /* 闪烁加载动画 */
+    @keyframes shimmer {
+      0% { background-position: -1000px 0; }
+      100% { background-position: 1000px 0; }
+    }
+    .animate-shimmer {
+      animation: shimmer 2s infinite;
+      background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(255, 255, 255, 0.05) 50%,
+        transparent 100%
+      );
+      background-size: 1000px 100%;
+    }
+
+    /* 悬停提升效果 */
+    .hover-lift {
+      transition: transform 200ms ease-out, box-shadow 200ms ease-out;
+    }
+    .hover-lift:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 25px -5px rgba(0, 0, 0, 0.3);
+    }
+
+    /* 渐变边框动画 */
+    @keyframes gradient-rotate {
+      0% { filter: hue-rotate(0deg); }
+      100% { filter: hue-rotate(360deg); }
+    }
+    .animate-gradient {
+      background-size: 200% 200%;
+      animation: gradient-x 3s ease infinite;
+    }
+
+    /* 呼吸效果 */
+    @keyframes breathe {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.02); opacity: 0.9; }
+    }
+    .animate-breathe {
+      animation: breathe 3s ease-in-out infinite;
+    }
+
+    /* 淡入动画类 */
+    .fade-in {
+      animation: fade-in 200ms ease-out forwards;
+    }
+    .fade-in-up {
+      animation: slide-up 300ms ease-out forwards;
+    }
+
+    /* 拖拽时的样式 */
+    .dragging {
+      opacity: 0.8;
+      cursor: grabbing;
+    }
+    .drag-over {
+      border-color: var(--primary) !important;
+      background: rgba(99, 102, 241, 0.1) !important;
+    }
+
+    /* 焦点环样式 */
+    *:focus-visible {
+      outline: 2px solid var(--primary);
+      outline-offset: 2px;
+    }
+
+    /* 文本选择样式 */
+    ::selection {
+      background: rgba(99, 102, 241, 0.3);
+      color: inherit;
+    }
+
+    /* 禁用文本选择（某些元素） */
+    .no-select {
+      user-select: none;
+      -webkit-user-select: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/main.tsx"></script>
+</body>
+</html>
