@@ -151,8 +151,19 @@ export function V0AnalysisPage({ onNavigate }: V0Props) {
     }
   }
 
-  // 还在检查配置中，不渲染任何内容避免闪烁
-  if (aiConfigured === null) return null
+  // 还在检查配置中 — 显示加载状态，避免闪烁
+  if (aiConfigured === null) {
+    return (
+      <PageLayout activeItem="analysis" onNavigate={onNavigate}>
+        <div className="flex items-center justify-center py-24">
+          <div className="flex flex-col items-center gap-3 text-muted-foreground">
+            <div className="h-10 w-10 rounded-xl border-2 border-primary/30 border-t-primary animate-spin" />
+            <span className="text-sm">加载中...</span>
+          </div>
+        </div>
+      </PageLayout>
+    )
+  }
 
   // Show AI configuration placeholder when AI is not configured
   if (!aiConfigured) {

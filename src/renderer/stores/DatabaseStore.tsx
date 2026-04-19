@@ -30,6 +30,9 @@ export interface TableSchemaInfo {
   }>
 }
 
+// 连接方式类型
+export type ConnectionMethod = 'standard' | 'ssh' | 'cloud' | 'local' | 'file' | 'demo'
+
 export interface DatabaseConfig {
   id: string
   name: string
@@ -51,6 +54,8 @@ export interface DatabaseConfig {
   schemaInfo?: TableSchemaInfo
   // 用户已在数据字典中确认过该表的字段含义
   schemaConfirmed?: boolean
+  // 连接方式：用于分类展示
+  connectMethod?: ConnectionMethod
 }
 
 const DatabaseContext = createContext<DatabaseContextType | undefined>(undefined)

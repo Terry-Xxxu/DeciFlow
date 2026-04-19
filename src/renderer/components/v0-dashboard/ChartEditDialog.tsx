@@ -512,7 +512,7 @@ export function ChartEditDialog({ isOpen, onClose, onSave, editChart }: ChartEdi
       </CardContent>
     </Card>
 
-    {/* 表浏览器 */}
+    {/* 表浏览器 — 使用更高 z-index 确保显示在 ChartEditDialog 之上 */}
     {selectedDatabase && (
       <TableBrowser
         isOpen={showTableBrowser}
@@ -520,6 +520,7 @@ export function ChartEditDialog({ isOpen, onClose, onSave, editChart }: ChartEdi
         database={selectedDatabase}
         onSelect={handleTableSelect}
         selectedTable={tableName}
+        zIndex="z-[70]"
       />
     )}
   </div>

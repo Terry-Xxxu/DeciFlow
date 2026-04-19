@@ -27,6 +27,9 @@ import {
   FolderOpen,
   RefreshCw,
   Eye,
+  BarChart3,
+  Table,
+  ExternalLink,
 } from "lucide-react"
 import { cn } from "../lib/utils"
 import { useDatabase } from "../stores/DatabaseStore"
@@ -53,6 +56,19 @@ const MAX_FILE_SIZE = 100 * 1024 * 1024
 
 // 连接场景类型
 type ConnectionScenario = "standard" | "ssh" | "cloud" | "local" | "file"
+
+// 连接方式排序顺序（用于分类展示）
+const CONNECT_METHOD_ORDER = ['standard', 'ssh', 'cloud', 'local', 'file', 'demo']
+
+// 连接方式标签配置
+const CONNECT_METHOD_CONFIG: Record<string, { label: string; tagColor: string; icon: React.ComponentType<{ className?: string }> }> = {
+  demo:     { label: '示例数据',  tagColor: 'border-violet-500/30 text-violet-600 dark:text-violet-400', icon: BarChart3 },
+  standard: { label: '直连',     tagColor: 'border-blue-500/30 text-blue-600 dark:text-blue-400',       icon: Link },
+  ssh:      { label: 'SSH',       tagColor: 'border-violet-500/30 text-violet-600 dark:text-violet-400', icon: Shield },
+  cloud:    { label: '云数据库',  tagColor: 'border-sky-500/30 text-sky-600 dark:text-sky-400',         icon: Cloud },
+  local:    { label: '本地',     tagColor: 'border-amber-500/30 text-amber-600 dark:text-amber-400',   icon: Laptop },
+  file:     { label: '文件上传', tagColor: 'border-emerald-500/30 text-emerald-600 dark:text-emerald-400', icon: Upload },
+}
 
 // 场景配置
 const scenarios = [
@@ -162,9 +178,6 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
   const [refreshingId, setRefreshingId] = useState<string | null>(null)
   const [editingSource, setEditingSource] = useState<DatabaseConfig | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<DatabaseConfig | null>(null)
-  const [previewDb, setPreviewDb] = useState<DatabaseConfig | null>(null)
-  const [previewData, setPreviewData] = useState<{ columns: string[]; rows: any[]; total: number } | null>(null)
-  const [previewLoading, setPreviewLoading] = useState(false)
 
   // 项目折叠状态
   const [collapsedProjects, setCollapsedProjects] = useState<Set<string>>(new Set())
@@ -173,6 +186,69 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
   // 项目重命名内联编辑
   const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState("")
+
+  // Demo 数据库展开的表格列表
+  const [expandedTables, setExpandedTables] = useState<Record<string, string[]>>({})
+  // 表格预览状态
+  const [previewTable, setPreviewTable] = useState<{ db: DatabaseConfig; table: string } | null>(null)
+  const [previewTableData, setPreviewTableData] = useState<{ columns: string[]; rows: any[]; total: number } | null>(null)
+  const [previewTableLoading, setPreviewTableLoading] = useState(false)
+
+  // 根据数据库 host/type 推断连接方式
+  const getConnectionMethod = (db: DatabaseConfig): string => {
+    const method = (db as any).connectMethod
+    if (method) return method
+    if (db.type === 'demo') return 'demo'
+    if (db.type === 'file') return 'file'
+    return 'standard'
+  }
+
+  // 展开 demo 数据库的表格
+  const handleExpandTables = async (db: DatabaseConfig) => {
+    if (expandedTables[db.id]) {
+      // 已经展开过，折叠
+      setExpandedTables(prev => {
+        const next = { ...prev }
+        delete next[db.id]
+        return next
+      })
+      return
+    }
+    // demo 数据库直接用已知表名，无需调用 API
+    if (db.type === 'demo') {
+      setExpandedTables(prev => ({ ...prev, [db.id]: ['users', 'orders', 'products', 'events'] }))
+      return
+    }
+    // 其他数据库调用主进程获取表列表
+    try {
+      const tables: string[] = await (window as any).electronAPI.database.tables(db)
+      setExpandedTables(prev => ({ ...prev, [db.id]: tables || [] }))
+    } catch {
+      setExpandedTables(prev => ({ ...prev, [db.id]: [] }))
+    }
+  }
+
+  // 预览表格数据（包含基础统计）
+  const handlePreviewTable = async (db: DatabaseConfig, tableName: string) => {
+    setPreviewTable({ db, table: tableName })
+    setPreviewTableData(null)
+    setPreviewTableLoading(true)
+    try {
+      const result = await (window as any).electronAPI.database.query(db, `SELECT * FROM "${tableName}" LIMIT 100`)
+      if (!result.success) {
+        throw new Error(result.error || '查询失败')
+      }
+      const rows = result.data?.rows || []
+      const cols = result.data?.columns || []
+      const rowCount = result.data?.rowCount ?? rows.length
+      setPreviewTableData({ columns: cols, rows: rows.slice(0, 100), total: rowCount })
+    } catch (err: any) {
+      showToast(`预览失败：${err?.message || '请检查连接'}`, "error")
+      setPreviewTable(null)
+    } finally {
+      setPreviewTableLoading(false)
+    }
+  }
 
   // 添加数据源
   const handleAdd = () => {
@@ -199,6 +275,7 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
           username: "",
           connected: true,
           projectId: newSource.projectId || "default",
+          connectMethod: "file" as any,
         }
         addDatabase(config)
         showToast("文件数据源已添加", "success")
@@ -215,6 +292,7 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
             username: "",
             connected: true,
             projectId: newSource.projectId || "default",
+            connectMethod: "file" as any,
           }
           addDatabase(config)
         })
@@ -242,6 +320,7 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
         username: "",
         connected: false,
         projectId: newSource.projectId || "default",
+        connectMethod: "cloud" as any,
       }
       addDatabase(config)
       showToast("云数据库已添加", "success")
@@ -261,6 +340,7 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
         password: newSource.password || "",
         connected: false,
         projectId: newSource.projectId || "default",
+        connectMethod: "ssh" as any,
       }
       addDatabase(config)
       showToast("SSH 隧道数据源已添加", "info")
@@ -280,6 +360,7 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
         password: "",
         connected: false,
         projectId: newSource.projectId || "default",
+        connectMethod: "local" as any,
       }
       addDatabase(config)
       showToast("本地数据库已添加", "success")
@@ -300,6 +381,7 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
         password: newSource.password || "",
         connected: false,
         projectId: newSource.projectId || "default",
+        connectMethod: "standard" as any,
       }
       addDatabase(config)
       showToast('数据库已添加，请点击"连接"按钮建立连接', "info")
@@ -427,36 +509,6 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
     }
   }
 
-  // 预览数据（前100行）
-  const handlePreview = async (db: DatabaseConfig) => {
-    setPreviewDb(db)
-    setPreviewData(null)
-    setPreviewLoading(true)
-    try {
-      // 获取第一张表名（文件类型跳过）
-      let tableName = ''
-      if (db.type !== 'file') {
-        try {
-          const tables = await (window as any).electronAPI.database.tables(db)
-          if (Array.isArray(tables) && tables.length > 0) tableName = tables[0]
-        } catch { /* ignore */ }
-      }
-      const sql = tableName
-        ? `SELECT * FROM "${tableName}" LIMIT 100`
-        : 'SELECT * LIMIT 100'
-      const result = await window.electronAPI.database.query(db, sql)
-      const rows = result.data?.rows || result.rows || []
-      const cols = result.data?.columns || result.columns || []
-      const rowCount = result.data?.rowCount ?? result.rowCount ?? rows.length
-      setPreviewData({ columns: cols, rows: rows.slice(0, 100), total: rowCount })
-    } catch (err: any) {
-      showToast(`数据预览失败：${err?.message || '请检查连接'}`, "error")
-      setPreviewDb(null)
-    } finally {
-      setPreviewLoading(false)
-    }
-  }
-
   // 编辑数据源
   const handleSaveEdit = (updatedConfig: DatabaseConfig) => {
     updateDatabase(updatedConfig.id, updatedConfig)
@@ -471,9 +523,9 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
 
   const confirmDelete = () => {
     if (deleteConfirm) {
-      removeDatabase(deleteConfirm.id)
+      const idToRemove = deleteConfirm.id
       setDeleteConfirm(null)
-      showToast("数据源已删除", "success")
+      removeDatabase(idToRemove)
     }
   }
 
@@ -646,62 +698,54 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
                   </div>
                 </div>
 
-                {/* 项目下的数据源列表（按类型分组） */}
+                {/* 项目下的数据源列表（按连接方式分组） */}
                 {!isCollapsed && (
                   <div className="pl-6 space-y-4">
                     {projectDbs.length === 0 ? (
                       <p className="text-sm text-muted-foreground py-2">暂无数据源</p>
                     ) : (() => {
-                      const fileDbs = projectDbs.filter(d => d.type === 'file')
-                      const realDbs = projectDbs.filter(d => d.type !== 'file')
+                      // 按连接方式分组并排序
+                      const grouped: Record<string, typeof projectDbs> = {}
+                      projectDbs.forEach(db => {
+                        const method = (db as any).connectMethod || getConnectionMethod(db)
+                        if (!grouped[method]) grouped[method] = []
+                        grouped[method].push(db)
+                      })
+                      const sortedGroups = CONNECT_METHOD_ORDER.filter(m => grouped[m]?.length > 0)
+
                       return (
                         <>
-                          {realDbs.length > 0 && (
-                            <div className="space-y-2">
-                              {(fileDbs.length > 0) && (
-                                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">直连数据库</p>
-                              )}
-                              <div className="grid gap-2">
-                                {realDbs.map((dataSource) => (
-                                  <DataSourceCard
-                                    key={dataSource.id}
-                                    db={dataSource}
-                                    isConnected={!!dataSource.connected}
-                                    testing={testingId === dataSource.id}
-                                    refreshing={refreshingId === dataSource.id}
-                                    onToggleConnection={() => handleToggleConnection(dataSource)}
-                                    onRefreshSchema={() => handleRefreshSchema(dataSource)}
-                                    onEdit={() => setEditingSource(dataSource)}
-                                    onDelete={() => handleDelete(dataSource)}
-                                    onPreview={() => handlePreview(dataSource)}
-                                  />
-                                ))}
+                          {sortedGroups.map(method => {
+                            const dbs = grouped[method]
+                            const cfg = CONNECT_METHOD_CONFIG[method] || CONNECT_METHOD_CONFIG.file
+                            return (
+                              <div key={method} className="space-y-2">
+                                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                                  {cfg.label}
+                                </p>
+                                <div className="grid gap-2">
+                                  {dbs.map((dataSource) => (
+                                    <DataSourceCard
+                                      key={dataSource.id}
+                                      db={dataSource}
+                                      isConnected={!!dataSource.connected}
+                                      testing={testingId === dataSource.id}
+                                      refreshing={refreshingId === dataSource.id}
+                                      onToggleConnection={() => handleToggleConnection(dataSource)}
+                                      onRefreshSchema={() => handleRefreshSchema(dataSource)}
+                                      onEdit={() => setEditingSource(dataSource)}
+                                      onDelete={() => handleDelete(dataSource)}
+                                      onExpandTables={dataSource.type === 'demo' || (dataSource as any).connectMethod === 'demo'
+                                        ? () => handleExpandTables(dataSource)
+                                        : undefined}
+                                      expandedTables={expandedTables[dataSource.id]}
+                                      onPreviewTable={handlePreviewTable}
+                                    />
+                                  ))}
+                                </div>
                               </div>
-                            </div>
-                          )}
-                          {fileDbs.length > 0 && (
-                            <div className="space-y-2">
-                              {(realDbs.length > 0) && (
-                                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">文件上传</p>
-                              )}
-                              <div className="grid gap-2">
-                                {fileDbs.map((dataSource) => (
-                                  <DataSourceCard
-                                    key={dataSource.id}
-                                    db={dataSource}
-                                    isConnected={!!dataSource.connected}
-                                    testing={testingId === dataSource.id}
-                                    refreshing={refreshingId === dataSource.id}
-                                    onToggleConnection={() => handleToggleConnection(dataSource)}
-                                    onRefreshSchema={() => handleRefreshSchema(dataSource)}
-                                    onEdit={() => setEditingSource(dataSource)}
-                                    onDelete={() => handleDelete(dataSource)}
-                                    onPreview={() => handlePreview(dataSource)}
-                                  />
-                                ))}
-                              </div>
-                            </div>
-                          )}
+                            )
+                          })}
                         </>
                       )
                     })()}
@@ -766,39 +810,43 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
         />
       )}
 
-      {/* Data Preview Modal */}
-      {previewDb && (
+      {/* Table Preview Modal */}
+      {previewTable && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-          onClick={(e) => { if (e.target === e.currentTarget) { setPreviewDb(null); setPreviewData(null) } }}
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) { setPreviewTable(null); setPreviewTableData(null) } }}
         >
           <Card className="w-full max-w-4xl max-h-[85vh] flex flex-col shadow-xl" onClick={(e) => e.stopPropagation()}>
             <CardHeader className="flex flex-row items-center justify-between pb-3">
               <div>
-                <CardTitle className="text-base">数据预览 — {previewDb.name}</CardTitle>
-                {previewData && (
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Table className="h-4 w-4 text-primary" />
+                  {previewTable.table}
+                  <span className="text-muted-foreground font-normal text-sm">— {previewTable.db.name}</span>
+                </CardTitle>
+                {previewTableData && (
                   <CardDescription>
-                    显示前 {previewData.rows.length} 行
-                    {previewData.total > 100 && `，共 ${previewData.total} 行（已省略 ${previewData.total - previewData.rows.length} 行）`}
+                    显示前 {previewTableData.rows.length} 行
+                    {previewTableData.total > 100 && `，共 ${previewTableData.total} 行`}
                   </CardDescription>
                 )}
               </div>
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setPreviewDb(null); setPreviewData(null) }}>
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setPreviewTable(null); setPreviewTableData(null) }}>
                 <X className="h-4 w-4" />
               </Button>
             </CardHeader>
             <CardContent className="flex-1 overflow-auto custom-scrollbar">
-              {previewLoading ? (
+              {previewTableLoading ? (
                 <div className="flex items-center justify-center py-16">
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground mr-2" />
                   <span className="text-muted-foreground">加载数据中...</span>
                 </div>
-              ) : previewData && previewData.columns.length > 0 ? (
+              ) : previewTableData && previewTableData.columns.length > 0 ? (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm border-collapse">
                     <thead>
                       <tr className="border-b border-border">
-                        {previewData.columns.map((col) => (
+                        {previewTableData.columns.map((col) => (
                           <th key={col} className="px-3 py-2 text-left text-xs font-semibold text-muted-foreground whitespace-nowrap bg-muted/30">
                             {col}
                           </th>
@@ -806,9 +854,9 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
                       </tr>
                     </thead>
                     <tbody>
-                      {previewData.rows.map((row, i) => (
+                      {previewTableData.rows.map((row, i) => (
                         <tr key={i} className="border-b border-border/50 hover:bg-muted/20">
-                          {previewData.columns.map((col) => (
+                          {previewTableData.columns.map((col) => (
                             <td key={col} className="px-3 py-2 text-foreground whitespace-nowrap max-w-[200px] truncate">
                               {row[col] === null || row[col] === undefined ? (
                                 <span className="text-muted-foreground italic">null</span>
@@ -823,8 +871,8 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
               ) : (
                 <div className="flex flex-col items-center justify-center py-16 text-center">
                   <Database className="h-10 w-10 text-muted-foreground/50 mb-3" />
-                  <p className="text-muted-foreground">暂无数据或无法预览</p>
-                  <p className="text-xs text-muted-foreground/70 mt-1">请确认数据库中有数据表</p>
+                  <p className="text-muted-foreground">暂无数据</p>
+                  <p className="text-xs text-muted-foreground/70 mt-1">该表中没有数据</p>
                 </div>
               )}
             </CardContent>
@@ -845,7 +893,9 @@ interface DataSourceCardProps {
   onRefreshSchema: () => void
   onEdit: () => void
   onDelete: () => void
-  onPreview: () => void
+  onExpandTables?: () => void
+  expandedTables?: string[]
+  onPreviewTable?: (db: DatabaseConfig, table: string) => void
 }
 
 function DataSourceCard({
@@ -857,67 +907,88 @@ function DataSourceCard({
   onRefreshSchema,
   onEdit,
   onDelete,
-  onPreview,
+  onExpandTables,
+  expandedTables,
+  onPreviewTable,
 }: DataSourceCardProps) {
   const isFile = db.type === 'file'
+  const isDemo = db.type === 'demo' || (db as any).connectMethod === 'demo'
+  const connectMethod = (db as any).connectMethod || 'standard'
+  const methodCfg = CONNECT_METHOD_CONFIG[connectMethod] || CONNECT_METHOD_CONFIG.standard
+  const MethodIcon = methodCfg.icon
+
   const getDbTypeLabel = (type: string) => {
     if (type === 'file') return '文件上传'
+    if (type === 'demo') return '示例数据'
     const found = dbTypes.find((t) => t.id === type)
     return found?.name || type
   }
+
+  const isExpanded = !!expandedTables
 
   return (
     <Card className={cn("overflow-hidden", isConnected && "border-primary/30")}>
       <CardContent className="p-5">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0 flex-1">
+            {/* 展开/折叠按钮（仅 demo 数据库） */}
+            {isDemo && onExpandTables ? (
+              <button
+                onClick={onExpandTables}
+                className={cn(
+                  "flex-shrink-0 w-8 h-8 rounded flex items-center justify-center transition-colors",
+                  "hover:bg-muted text-muted-foreground hover:text-foreground"
+                )}
+                title={isExpanded ? "收起表格" : "展开查看表格"}
+              >
+                {isExpanded
+                  ? <ChevronDown className="h-4 w-4" />
+                  : <ChevronRight className="h-4 w-4" />
+                }
+              </button>
+            ) : (
+              <div className="flex-shrink-0 w-8" />
+            )}
+
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 flex-shrink-0">
-              {isFile ? <File className="h-5 w-5 text-primary" /> : <Database className="h-5 w-5 text-primary" />}
+              {isDemo ? <BarChart3 className="h-5 w-5 text-primary" />
+                : isFile ? <File className="h-5 w-5 text-primary" />
+                : <Database className="h-5 w-5 text-primary" />}
             </div>
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="font-semibold text-foreground">{db.name}</h3>
-                <Badge variant="outline" className={cn(
-                  "text-xs gap-1",
-                  isFile ? "border-amber-500/30 text-amber-600 dark:text-amber-400" : "border-blue-500/30 text-blue-600 dark:text-blue-400"
-                )}>
-                  {getDbTypeLabel(db.type as string)}
+                {/* 连接方式标签 */}
+                <Badge variant="outline" className={cn("text-xs gap-1", methodCfg.tagColor)}>
+                  <MethodIcon className="h-3 w-3" />
+                  {methodCfg.label}
                 </Badge>
-                {isFile && (
-                  <Badge variant="outline" className="text-xs border-muted text-muted-foreground">
-                    无需密码
+                {/* 数据库类型标签（仅非 demo 和非 file 时显示） */}
+                {!isDemo && !isFile && (
+                  <Badge variant="outline" className="text-xs border-border text-muted-foreground">
+                    {getDbTypeLabel(db.type as string)}
                   </Badge>
                 )}
+                {/* 连接状态 */}
                 {isConnected ? (
-                  <Badge variant="outline" className="text-xs text-green-600 dark:text-green-500">
+                  <Badge variant="outline" className="text-xs text-green-600 dark:text-green-500 border-green-500/30">
                     已连接
                   </Badge>
                 ) : (
-                  <Badge variant="outline" className="text-xs text-muted-foreground">
+                  <Badge variant="outline" className="text-xs text-muted-foreground border-border">
                     未连接
                   </Badge>
                 )}
               </div>
               <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                {isFile ? db.database : `${db.host}:${db.port} / ${db.database}`}
+                {isFile ? db.database : isDemo ? '示例数据 · 包含 4 张表' : `${db.host}:${db.port} / ${db.database}`}
               </p>
             </div>
           </div>
+
           <div className="flex items-center gap-0.5 flex-shrink-0 ml-2">
-            {/* 预览数据 */}
-            {isConnected && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-muted-foreground hover:text-primary"
-                onClick={onPreview}
-                title="预览数据"
-              >
-                <Eye className="h-4 w-4" />
-              </Button>
-            )}
-            {/* 刷新 Schema：仅已连接的真实数据库显示 */}
-            {isConnected && !isFile && (
+            {/* 刷新 Schema */}
+            {isConnected && !isFile && !isDemo && (
               <Button
                 variant="ghost"
                 size="icon"
@@ -929,6 +1000,7 @@ function DataSourceCard({
                 <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
               </Button>
             )}
+            {/* 连接/断开按钮 */}
             <Button
               variant="ghost"
               size="icon"
@@ -968,6 +1040,37 @@ function DataSourceCard({
             </Button>
           </div>
         </div>
+
+        {/* 展开的表格列表（demo 数据库） */}
+        {isExpanded && expandedTables && (
+          <div className="mt-4 pl-10 space-y-1">
+            <p className="text-xs font-medium text-muted-foreground mb-2">数据表</p>
+            {expandedTables.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-1">暂无法获取表列表</p>
+            ) : (
+              expandedTables.map(tableName => (
+                <div
+                  key={tableName}
+                  className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-muted/60 transition-colors group"
+                >
+                  <div className="flex items-center gap-2">
+                    <Table className="h-3.5 w-3.5 text-muted-foreground" />
+                    <span className="text-sm font-medium text-foreground">{tableName}</span>
+                  </div>
+                  {isConnected && onPreviewTable && (
+                    <button
+                      onClick={() => onPreviewTable(db, tableName)}
+                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors opacity-0 group-hover:opacity-100"
+                    >
+                      <Eye className="h-3 w-3" />
+                      概览
+                    </button>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        )}
       </CardContent>
     </Card>
   )

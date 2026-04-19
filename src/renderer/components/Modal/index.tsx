@@ -16,6 +16,7 @@ export interface ModalProps {
   showCloseButton?: boolean
   closeOnBackdropClick?: boolean
   closeOnEscape?: boolean
+  zIndex?: string
 }
 
 export const Modal: React.FC<ModalProps> = ({
@@ -27,6 +28,7 @@ export const Modal: React.FC<ModalProps> = ({
   showCloseButton = true,
   closeOnBackdropClick = true,
   closeOnEscape = true,
+  zIndex = 'z-50',
 }) => {
   const { mode } = useTheme()
   const modalRef = useRef<HTMLDivElement>(null)
@@ -90,7 +92,7 @@ export const Modal: React.FC<ModalProps> = ({
 
   return ReactDOM.createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn"
+      className={`fixed inset-0 ${zIndex} flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn`}
       onClick={handleBackdropClick}
     >
       <div

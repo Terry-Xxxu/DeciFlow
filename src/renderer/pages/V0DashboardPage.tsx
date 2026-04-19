@@ -48,8 +48,15 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
   const [chartRecommendation, setChartRecommendation] = useState<ChartRecommendation | null>(null)
   const [aiInsights, setAiInsights] = useState<any[]>([])
   const [isInsightLoading, setIsInsightLoading] = useState(false)
-  // 多选表格：空数组 = 全部
+  // 多选数据源 ID：空数组 = 全部
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  // 每个数据库下选中的表格：{ [dbId]: [tableName, ...] }
+  const [selectedTables, setSelectedTables] = useState<Record<string, string[]>>({})
+  // 每个数据库下的表格列表缓存
+  const [dbTableLists, setDbTableLists] = useState<Record<string, string[]>>({})
+  const [loadingTables, setLoadingTables] = useState<Set<string>>(new Set())
+  // 当前展开的数据库（点击后展开显示表格）
+  const [expandedDbId, setExpandedDbId] = useState<string | null>(null)
   // AI 是否已配置
   const [hasAI, setHasAI] = useState(false)
   // 分析目标选择器下拉状态
@@ -84,6 +91,68 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
     setSelectedIds(prev =>
       prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
     )
+    // 取消选择数据库时同时清除其表格选择
+    if (selectedIds.includes(id)) {
+      setSelectedTables(prev => {
+        const next = { ...prev }
+        delete next[id]
+        return next
+      })
+    }
+  }
+
+  // 展开数据库时获取表格列表
+  const handleExpandDb = async (dbId: string) => {
+    if (expandedDbId === dbId) {
+      setExpandedDbId(null)
+      return
+    }
+    setExpandedDbId(dbId)
+    if (dbTableLists[dbId]) return // 已缓存
+    setLoadingTables(prev => new Set(prev).add(dbId))
+    try {
+      const db = connectedDatabases.find(d => d.id === dbId)
+      if (!db) return
+      // Demo 数据库直接使用已知表名
+      if (db.type === 'demo') {
+        setDbTableLists(prev => ({ ...prev, [dbId]: ['users', 'orders', 'products', 'events'] }))
+        return
+      }
+      const tables: string[] = await (window as any).electronAPI.database.tables(db)
+      setDbTableLists(prev => ({ ...prev, [dbId]: tables || [] }))
+    } catch {
+      setDbTableLists(prev => ({ ...prev, [dbId]: [] }))
+    } finally {
+      setLoadingTables(prev => {
+        const next = new Set(prev)
+        next.delete(dbId)
+        return next
+      })
+    }
+  }
+
+  // 切换表格选中状态
+  const toggleTable = (dbId: string, tableName: string) => {
+    // 选中表格时，自动选中该数据库
+    if (!selectedIds.includes(dbId)) {
+      setSelectedIds(prev => [...prev, dbId])
+    }
+    setSelectedTables(prev => {
+      const current = prev[dbId] || []
+      const next = current.includes(tableName)
+        ? current.filter(t => t !== tableName)
+        : [...current, tableName]
+      return { ...prev, [dbId]: next }
+    })
+  }
+
+  // 清除某数据库下所有表格
+  const clearDbTables = (dbId: string) => {
+    setSelectedTables(prev => {
+      const next = { ...prev }
+      delete next[dbId]
+      return next
+    })
   }
 
   const handleQuery = async (query: string) => {
@@ -107,6 +176,96 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
       : connectedDatabases[0]
     const db = primaryDb
 
+    // ── Demo 数据库 + 无 AI：跑统计 SQL，给出有意义的分析结果 ──
+    const isDemoDb = db.type === 'demo'
+    if (isDemoDb && !hasAI) {
+      const dbId = selectedIds[0] || connectedDatabases[0]?.id
+      const tables = dbId ? (selectedTables[dbId] || []) : []
+      const targetTables = tables.length > 0 ? tables : ['users']
+      setIsLoading(true)
+      setLoadingStage('正在分析表结构…')
+      setQueryError(null)
+      setQueryResult(null)
+      setChartRecommendation(null)
+      setAiInsights([])
+      try {
+        const tableName = targetTables[0]
+
+        // Step 1: 先拿字段信息
+        setLoadingStage('获取字段…')
+        const schemaResult = await window.electronAPI.database.query(
+          db, `SELECT * FROM "${tableName}" WHERE 1=0`
+        )
+        const columns: string[] = schemaResult.data?.columns || schemaResult.columns || []
+        if (columns.length === 0) throw new Error('无法获取表结构')
+
+        // Step 2: 跑 COUNT 等统计
+        setLoadingStage('统计记录数…')
+        const countResult = await window.electronAPI.database.query(
+          db, `SELECT COUNT(*) as cnt FROM "${tableName}"`
+        )
+        const totalRows = countResult.data?.rows?.[0]?.cnt ?? 0
+
+        // Step 3: 跑各字段统计（数字字段取 min/max/avg，非数字取 count distinct + top5）
+        const analysisRows: Record<string, any>[] = []
+        for (const col of columns) {
+          const lowerCol = col.toLowerCase()
+          const isNumeric = /^(id|amount|price|stock|count|total|sum|value|num|qty)$/i.test(col) ||
+            col.includes('_id') || col.includes('count') || col.includes('amount') ||
+            col.includes('price') || col.includes('total')
+
+          const colResult = await window.electronAPI.database.query(
+            db,
+            isNumeric
+              ? `SELECT MIN("${col}") as min_val, MAX("${col}") as max_val, AVG("${col}") as avg_val FROM "${tableName}"`
+              : `SELECT COUNT(DISTINCT "${col}") as distinct_count FROM "${tableName}"`
+          )
+          const row0 = colResult.data?.rows?.[0]
+          analysisRows.push({
+            字段: col,
+            类型: isNumeric ? '数值' : '文本',
+            ...(isNumeric
+              ? {
+                  最小值: row0?.min_val != null ? Number(row0.min_val).toFixed(2) : '—',
+                  最大值: row0?.max_val != null ? Number(row0.max_val).toFixed(2) : '—',
+                  平均值: row0?.avg_val != null ? Number(row0.avg_val).toFixed(2) : '—',
+                }
+              : {
+                  不同值数: row0?.distinct_count ?? 0,
+                }),
+          })
+        }
+
+        const result: QueryResult = {
+          columns: analysisRows.length > 0 ? Object.keys(analysisRows[0]) : [],
+          rows: analysisRows,
+          rowCount: totalRows,
+          duration: 0,
+          sql: `统计分析 — ${tableName}`,
+        }
+        setQueryResult(result)
+        setLoadingStage('')
+
+        // 同时跑原始数据样本供图表推荐用
+        const sampleResult = await window.electronAPI.database.query(
+          db, `SELECT * FROM "${tableName}" LIMIT 100`
+        )
+        if (sampleResult.success) {
+          window.electronAPI.charts.recommend(sampleResult.data)
+            .then((rec: any) => { if (rec?.type) setChartRecommendation(rec) })
+            .catch(() => {})
+        }
+        addQueryToHistory(query, "success", totalRows, '0ms')
+      } catch (err: any) {
+        setQueryError(err?.message || "分析失败")
+        addQueryToHistory(query, "error")
+        showToast(err?.message || "分析失败", "error")
+      } finally {
+        setIsLoading(false)
+      }
+      return
+    }
+
     setIsLoading(true)
     setLoadingStage('正在生成 SQL…')
     setQueryError(null)
@@ -118,11 +277,19 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
 
     try {
       // Step 1: 自然语言 → SQL
-      const selectedTableNames = selectedIds.length > 0
-        ? selectedIds
-            .map(id => connectedDatabases.find(d => d.id === id)?.name)
-            .filter(Boolean) as string[]
-        : []
+      // 优先使用选中的具体表格名，否则回退到数据库名
+      const selectedTableNames = (() => {
+        if (selectedIds.length === 0) return []
+        if (selectedIds.length === 1) {
+          const dbId = selectedIds[0]
+          const tables = selectedTables[dbId]
+          if (tables && tables.length > 0) return tables
+        }
+        // 多数据库时使用数据库名
+        return selectedIds
+          .map(id => connectedDatabases.find(d => d.id === id)?.name)
+          .filter(Boolean) as string[]
+      })()
 
       const nlContext: Record<string, any> = {
         databaseName: db.database,
@@ -130,7 +297,7 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
         selectedTables: selectedTableNames,
       }
       if (selectedIds.length === 1) {
-        nlContext.tableName = db.name
+        nlContext.tableName = selectedTableNames[0] || db.name
       }
 
       const sqlResult = await window.electronAPI.nl.generateSQL(db.type, query, nlContext)
@@ -242,8 +409,16 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
                   {selectedIds.length === 0
                     ? '全部表格'
                     : selectedIds.length === 1
-                      ? connectedDatabases.find(d => d.id === selectedIds[0])?.name || '选择的表格'
-                      : `已选 ${selectedIds.length} 个表格`}
+                      ? (() => {
+                          const dbId = selectedIds[0]
+                          const tables = selectedTables[dbId]
+                          const dbName = connectedDatabases.find(d => d.id === dbId)?.name || ''
+                          if (tables && tables.length > 0) {
+                            return tables.length === 1 ? `${dbName} › ${tables[0]}` : `${dbName} › ${tables.length} 张表`
+                          }
+                          return dbName
+                        })()
+                      : `已选 ${selectedIds.length} 个数据源`}
                 </span>
                 <ChevronDown className={cn("h-4 w-4 text-muted-foreground flex-shrink-0 transition-transform", selectorOpen && "rotate-180")} />
               </button>
@@ -278,19 +453,84 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
                         </div>
                         {projectDbs.map((db) => {
                           const isSelected = selectedIds.includes(db.id)
+                          const tables = dbTableLists[db.id] || []
+                          const isExpanded = expandedDbId === db.id
+                          const isLoadingTables = loadingTables.has(db.id)
+                          const selectedDbTables = selectedTables[db.id] || []
+                          const hasTables = tables.length > 0 || db.type === 'demo'
+
                           return (
-                            <button
-                              key={db.id}
-                              onClick={() => toggleSource(db.id)}
-                              className={cn(
-                                "w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-muted/50",
-                                isSelected ? "text-primary font-medium" : "text-foreground"
+                            <div key={db.id} className="relative">
+                              <div className="flex items-center">
+                                {/* 数据库行 */}
+                                <button
+                                  onClick={() => toggleSource(db.id)}
+                                  className={cn(
+                                    "flex-1 flex items-center gap-2 px-3 py-2 text-sm transition-colors hover:bg-muted/50",
+                                    isSelected ? "text-primary font-medium" : "text-foreground"
+                                  )}
+                                >
+                                  {isSelected ? <Check className="h-3.5 w-3.5 flex-shrink-0" /> : <span className="w-3.5 h-3.5 flex-shrink-0" />}
+                                  <Database className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                                  <span className="truncate">{db.name}</span>
+                                </button>
+                                {/* 展开/折叠表格按钮（仅已选中的数据库显示） */}
+                                {isSelected && hasTables && (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); handleExpandDb(db.id) }}
+                                    className="flex-shrink-0 p-1 mr-1 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                                    title={isExpanded ? "收起表格" : "查看表格"}
+                                  >
+                                    {isLoadingTables ? (
+                                      <div className="h-3.5 w-3.5 border border-current border-t-transparent rounded-full animate-spin" />
+                                    ) : (
+                                      <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", isExpanded && "rotate-180")} />
+                                    )}
+                                  </button>
+                                )}
+                              </div>
+
+                              {/* 表格列表（展开时） */}
+                              {isExpanded && (
+                                <div className="pl-9 pr-3 pb-1 space-y-0.5">
+                                  {isLoadingTables ? (
+                                    <p className="text-xs text-muted-foreground py-1">加载中…</p>
+                                  ) : tables.length === 0 ? (
+                                    <p className="text-xs text-muted-foreground py-1">暂无法获取表列表</p>
+                                  ) : (
+                                    <>
+                                      {tables.map(tableName => {
+                                        const isTableSelected = selectedDbTables.includes(tableName)
+                                        return (
+                                          <button
+                                            key={tableName}
+                                            onClick={() => toggleTable(db.id, tableName)}
+                                            className={cn(
+                                              "w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors hover:bg-muted/50",
+                                              isTableSelected ? "text-primary font-medium" : "text-foreground/80"
+                                            )}
+                                          >
+                                            {isTableSelected
+                                              ? <Check className="h-3 w-3 flex-shrink-0" />
+                                              : <span className="w-3 h-3 flex-shrink-0" />
+                                            }
+                                            <span className="text-xs truncate">{tableName}</span>
+                                          </button>
+                                        )
+                                      })}
+                                      {selectedDbTables.length > 0 && (
+                                        <button
+                                          onClick={() => clearDbTables(db.id)}
+                                          className="w-full text-xs text-muted-foreground hover:text-foreground py-1 pl-2 transition-colors"
+                                        >
+                                          清除选择
+                                        </button>
+                                      )}
+                                    </>
+                                  )}
+                                </div>
                               )}
-                            >
-                              {isSelected ? <Check className="h-3.5 w-3.5 flex-shrink-0" /> : <span className="w-3.5 h-3.5 flex-shrink-0" />}
-                              <Database className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
-                              <span className="truncate">{db.name}</span>
-                            </button>
+                            </div>
                           )
                         })}
                       </div>
@@ -302,11 +542,15 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
 
             {/* 一键概览 */}
             <button
-              onClick={() =>
-                selectedIds.length === 1
-                  ? handleQuery('对这张表做一个基础统计分析，包括总记录数、主要字段的分布情况')
-                  : handleQuery('对所有数据表做基础统计分析，列出每张表的记录数')
-              }
+              onClick={() => {
+                if (selectedIds.length === 0) {
+                  handleQuery('对所有数据表做基础统计分析，列出每张表的记录数')
+                } else if (selectedIds.length === 1) {
+                  handleQuery('对选中的表做一个基础统计分析，包括总记录数、主要字段的分布情况')
+                } else {
+                  handleQuery('对所有数据表做基础统计分析，列出每张表的记录数')
+                }
+              }}
               disabled={isLoading}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
             >

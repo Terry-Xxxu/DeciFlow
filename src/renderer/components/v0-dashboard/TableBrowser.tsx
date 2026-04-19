@@ -53,6 +53,7 @@ interface TableBrowserProps {
   onSelect: (tableName: string, columns?: TableColumn[]) => void
   selectedTable?: string
   multiSelect?: boolean
+  zIndex?: string
 }
 
 export function TableBrowser({
@@ -62,6 +63,7 @@ export function TableBrowser({
   onSelect,
   selectedTable,
   multiSelect = false,
+  zIndex = 'z-50',
 }: TableBrowserProps) {
   const { mode } = useTheme()
   const isDark = mode === "dark"
@@ -177,6 +179,7 @@ export function TableBrowser({
     <Modal
       isOpen={isOpen}
       onClose={onClose}
+      zIndex={zIndex}
       title={
         <div className="flex items-center gap-2">
           <Database className="h-5 w-5 text-primary" />
