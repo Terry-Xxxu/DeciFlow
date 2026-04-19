@@ -5,7 +5,7 @@ import {
   BarChart3, Activity, Clock, ShoppingCart, RefreshCw, Package,
   Receipt, FileText, Globe, LayoutDashboard, LineChart, LogIn,
   ChevronDown, Plus, AlertCircle, CheckCircle2, X, Search,
-  ArrowRight, Settings,
+  ArrowRight, Settings, AlertTriangle, GitBranch, Zap, Grid3x3,
 } from 'lucide-react'
 import { useAnalysisTemplates, AnalysisTemplate } from '../../stores/AnalysisTemplateStore'
 import { useDatabase } from '../../stores/DatabaseStore'
@@ -15,6 +15,7 @@ const ICON_MAP: Record<string, React.ElementType> = {
   TrendingUp, Users, Repeat, DollarSign, Filter, UserPlus, UserMinus,
   BarChart3, Activity, Clock, ShoppingCart, RefreshCw, Package,
   Receipt, FileText, Globe, LayoutDashboard, LineChart, LogIn,
+  AlertTriangle, GitBranch, CheckCircle2, Search, Zap, Grid3x3,
 }
 
 // 每行最多显示的按钮数，超出部分进入"更多"下拉
@@ -120,24 +121,27 @@ function TemplateLibraryModal({
   const categories = ['all', ...Object.keys(categoryLabels)]
 
   const filtered = templateLibrary.filter(t => {
+    const q = search.toLowerCase()
     const matchesSearch =
       !search ||
-      t.name.includes(search) ||
-      t.description.includes(search) ||
-      t.categoryLabel.includes(search)
+      t.name.toLowerCase().includes(q) ||
+      t.description.toLowerCase().includes(q) ||
+      t.categoryLabel.toLowerCase().includes(q)
     const matchesCategory = activeCategory === 'all' || t.category === activeCategory
     return matchesSearch && matchesCategory
   })
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative flex h-[600px] w-full max-w-2xl flex-col rounded-2xl border border-border bg-card shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 py-8">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-4xl rounded-2xl border border-border bg-card shadow-2xl">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-border px-5 py-4">
+        <div className="sticky top-0 z-10 flex items-center justify-between rounded-t-2xl border-b border-border bg-card px-6 py-4">
           <div>
             <h2 className="font-semibold text-foreground">分析模板库</h2>
-            <p className="text-xs text-muted-foreground">选择模板添加到快捷入口</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              共 {templateLibrary.length} 个模板，覆盖增长、留存、收入、电商等场景
+            </p>
           </div>
           <button
             onClick={onClose}
@@ -147,80 +151,90 @@ function TemplateLibraryModal({
           </button>
         </div>
 
-        {/* Search */}
-        <div className="px-5 py-3">
-          <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
+        {/* Search + Category filter */}
+        <div className="flex gap-3 px-6 py-4 border-b border-border">
+          <div className="flex flex-1 items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
             <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder="搜索分析模板..."
+              placeholder="搜索模板名称或描述..."
               className="flex-1 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none"
+              autoFocus
             />
+            {search && (
+              <button onClick={() => setSearch('')} className="text-muted-foreground hover:text-foreground">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
+          <select
+            value={activeCategory}
+            onChange={e => setActiveCategory(e.target.value)}
+            className="rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary cursor-pointer min-w-[130px]"
+          >
+            <option value="all">全部分类</option>
+            {Object.entries(categoryLabels).map(([key, label]) => (
+              <option key={key} value={key}>{label}</option>
+            ))}
+          </select>
         </div>
 
-        {/* Category tabs */}
-        <div className="flex gap-1 overflow-x-auto px-5 pb-2">
-          {categories.map(cat => (
-            <button
-              key={cat}
-              onClick={() => setActiveCategory(cat)}
-              className={cn(
-                'shrink-0 rounded-full px-3 py-1 text-xs font-medium transition-colors',
-                activeCategory === cat
-                  ? 'bg-primary text-primary-foreground'
-                  : 'bg-muted text-muted-foreground hover:bg-muted/80 hover:text-foreground',
-              )}
-            >
-              {cat === 'all' ? '全部' : categoryLabels[cat] || cat}
-            </button>
-          ))}
-        </div>
-
-        {/* Template grid */}
-        <div className="flex-1 overflow-y-auto px-5 pb-5">
-          <div className="grid grid-cols-2 gap-2">
-            {filtered.map(template => {
-              const Icon = ICON_MAP[template.icon] || LayoutDashboard
-              const alreadyPinned = pinnedIds.includes(template.id)
-              return (
-                <div
-                  key={template.id}
-                  className="flex items-start gap-3 rounded-xl border border-border p-3 transition-colors hover:bg-muted/40"
-                >
-                  <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg', template.bgColor)}>
-                    <Icon className={cn('h-4 w-4', template.color)} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-foreground">{template.name}</p>
-                    <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">{template.description}</p>
-                    <span className="mt-1 inline-block rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
-                      {template.categoryLabel}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => { onPin(template.id); if (!alreadyPinned) onClose() }}
-                    className={cn(
-                      'mt-0.5 shrink-0 rounded-lg p-1.5 transition-colors',
-                      alreadyPinned
-                        ? 'text-primary'
-                        : 'text-muted-foreground hover:bg-primary/10 hover:text-primary',
-                    )}
-                    title={alreadyPinned ? '已添加' : '添加到快捷入口'}
-                  >
-                    {alreadyPinned ? (
-                      <CheckCircle2 className="h-4 w-4" />
-                    ) : (
-                      <Plus className="h-4 w-4" />
-                    )}
-                  </button>
-                </div>
-              )
-            })}
-          </div>
-          {filtered.length === 0 && (
-            <p className="py-8 text-center text-sm text-muted-foreground">未找到匹配的模板</p>
+        {/* Template grid — no inner scroll, content flows naturally */}
+        <div className="px-6 py-5">
+          {filtered.length === 0 ? (
+            <p className="py-12 text-center text-sm text-muted-foreground">未找到匹配的模板</p>
+          ) : (
+            <>
+              <p className="mb-3 text-xs text-muted-foreground">
+                {activeCategory === 'all' ? '全部' : categoryLabels[activeCategory]}
+                &nbsp;· {filtered.length} 个模板
+              </p>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {filtered.map(template => {
+                  const Icon = ICON_MAP[template.icon] || LayoutDashboard
+                  const alreadyPinned = pinnedIds.includes(template.id)
+                  return (
+                    <div
+                      key={template.id}
+                      className={cn(
+                        'group flex items-start gap-3 rounded-xl border p-3 transition-colors',
+                        alreadyPinned
+                          ? 'border-primary/30 bg-primary/5'
+                          : 'border-border hover:border-primary/30 hover:bg-muted/40'
+                      )}
+                    >
+                      <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg', template.bgColor)}>
+                        <Icon className={cn('h-4 w-4', template.color)} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-foreground leading-snug">{template.name}</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2 leading-relaxed">{template.description}</p>
+                        <span className="mt-1.5 inline-block rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+                          {template.categoryLabel}
+                        </span>
+                      </div>
+                      <button
+                        onClick={() => { onPin(template.id); if (!alreadyPinned) onClose() }}
+                        className={cn(
+                          'mt-0.5 shrink-0 rounded-lg p-1.5 transition-colors',
+                          alreadyPinned
+                            ? 'text-primary'
+                            : 'text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-primary/10 hover:text-primary',
+                        )}
+                        title={alreadyPinned ? '已添加' : '添加到快捷入口'}
+                      >
+                        {alreadyPinned ? (
+                          <CheckCircle2 className="h-4 w-4" />
+                        ) : (
+                          <Plus className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -271,7 +285,7 @@ export function QuickActions({ onNavigate, onQuerySelect }: QuickActionsProps) {
     if (onQuerySelect) {
       onQuerySelect(template.sampleQuestion)
     }
-    onNavigate?.('analysis')
+    // 结果直接在 Dashboard 的查询框下方展示，不跳转到分析页
   }
 
   const hasUnconfirmed = unconfirmedSourceIds.length > 0

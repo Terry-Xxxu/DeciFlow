@@ -13,6 +13,7 @@ import { Switch } from "../v0-ui/Switch"
 import { Badge } from "../v0-ui/Badge"
 import { ChartType, ChartConfig, AggregationType } from "../../types/chart"
 import { useDatabase } from "../../stores/DatabaseStore"
+import { useProjects } from "../../stores/ProjectStore"
 import { useTheme } from "../../contexts/ThemeContext"
 import { TableBrowser } from "./TableBrowser"
 import {
@@ -55,6 +56,7 @@ const generateId = () => `chart-${Date.now()}-${Math.random().toString(36).subst
 
 export function ChartEditDialog({ isOpen, onClose, onSave, editChart }: ChartEditDialogProps) {
   const { databases, getDatabaseById } = useDatabase()
+  const { projects } = useProjects()
   const { mode } = useTheme()
   const isEditing = !!editChart
   const isDark = mode === 'dark'
@@ -66,6 +68,7 @@ export function ChartEditDialog({ isOpen, onClose, onSave, editChart }: ChartEdi
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
   const [chartType, setChartType] = useState<ChartType>("bar")
+  const [selectedProjectId, setSelectedProjectId] = useState("default")
   const [databaseId, setDatabaseId] = useState("")
   const [tableName, setTableName] = useState("")
   const [query, setQuery] = useState("")
@@ -85,6 +88,8 @@ export function ChartEditDialog({ isOpen, onClose, onSave, editChart }: ChartEdi
       setName(editChart.name)
       setDescription(editChart.description || "")
       setChartType(editChart.type)
+      const editDb = databases.find(d => d.id === editChart.dataSource.databaseId)
+      setSelectedProjectId(editDb?.projectId || "default")
       setDatabaseId(editChart.dataSource.databaseId)
       setTableName(editChart.dataSource.tableName)
       setQuery(editChart.dataSource.query || "")
@@ -101,7 +106,9 @@ export function ChartEditDialog({ isOpen, onClose, onSave, editChart }: ChartEdi
       setName("")
       setDescription("")
       setChartType("bar")
-      setDatabaseId(databases[0]?.id || "")
+      const firstDb = databases[0]
+      setSelectedProjectId(firstDb?.projectId || "default")
+      setDatabaseId(firstDb?.id || "")
       setTableName("")
       setQuery("")
       setXAxis("")
@@ -116,14 +123,28 @@ export function ChartEditDialog({ isOpen, onClose, onSave, editChart }: ChartEdi
     }
   }, [editChart, isOpen, databases])
 
-  // 数据源选项
-  const databaseOptions = databases.map((db) => ({
+  // 按所选项目过滤数据库
+  const projectDatabases = databases.filter(
+    db => (db.projectId || "default") === selectedProjectId
+  )
+  const databaseOptions = projectDatabases.map((db) => ({
     value: db.id,
     label: db.name,
   }))
 
+  // 项目选项
+  const projectOptions = projects.map(p => ({ value: p.id, label: p.name }))
+
   // 获取当前选择的数据库配置
   const selectedDatabase = getDatabaseById(databaseId)
+
+  // 切换项目时重置数据库和数据表选择
+  const handleProjectChange = (projectId: string) => {
+    setSelectedProjectId(projectId)
+    const firstDb = databases.find(db => (db.projectId || "default") === projectId)
+    setDatabaseId(firstDb?.id || "")
+    setTableName("")
+  }
 
   // 处理打开表浏览器
   const handleOpenTableBrowser = () => {
@@ -316,13 +337,28 @@ export function ChartEditDialog({ isOpen, onClose, onSave, editChart }: ChartEdi
           <h3 className={headingClass}>数据源</h3>
           <div className="space-y-3">
             <div>
-              <label className={cn("text-sm mb-1.5 block", labelClass)}>选择数据库</label>
+              <label className={cn("text-sm mb-1.5 block", labelClass)}>选择项目</label>
               <Select
-                options={databaseOptions}
-                value={databaseId}
-                onChange={setDatabaseId}
-                placeholder="选择数据库"
+                options={projectOptions}
+                value={selectedProjectId}
+                onChange={handleProjectChange}
+                placeholder="选择项目"
               />
+            </div>
+            <div>
+              <label className={cn("text-sm mb-1.5 block", labelClass)}>选择数据库</label>
+              {projectDatabases.length === 0 ? (
+                <p className={cn("text-xs py-2", isDark ? "text-muted-foreground" : "text-gray-500")}>
+                  该项目下暂无数据库，请先在数据源页面添加
+                </p>
+              ) : (
+                <Select
+                  options={databaseOptions}
+                  value={databaseId}
+                  onChange={(val) => { setDatabaseId(val); setTableName("") }}
+                  placeholder="选择数据库"
+                />
+              )}
             </div>
             <div>
               <label className={cn("text-sm mb-1.5 block", labelClass)}>

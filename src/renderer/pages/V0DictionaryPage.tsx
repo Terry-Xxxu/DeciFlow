@@ -237,7 +237,7 @@ export function V0DictionaryPage({ onNavigate }: V0Props) {
         ...t,
         fields: t.fields.filter(f =>
           f.name.toLowerCase().includes(fieldSearch.toLowerCase()) ||
-          f.displayName.toLowerCase().includes(fieldSearch.toLowerCase())
+          (f.displayName || '').toLowerCase().includes(fieldSearch.toLowerCase())
         )
       })).filter(t => t.fields.length > 0)
     : tables

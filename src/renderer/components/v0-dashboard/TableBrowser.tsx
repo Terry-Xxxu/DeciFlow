@@ -137,7 +137,7 @@ export function TableBrowser({
       )
       setTableColumns((prev) => ({
         ...prev,
-        [tableName]: result?.columns || [],
+        [tableName]: result?.data?.columns || result?.columns || [],
       }))
       setExpandedTable(tableName)
     } catch (error) {

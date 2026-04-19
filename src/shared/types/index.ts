@@ -20,6 +20,10 @@ export interface DatabaseConfig {
   username: string
   password: string
   name?: string
+  ssl?: boolean                    // 启用 SSL/TLS（Neon、RDS、Supabase 等需要）
+  sslRejectUnauthorized?: boolean  // 是否严格验证服务器证书（默认 false，自签名证书需关闭）
+  isSRV?: boolean                  // mongodb+srv:// 协议（Atlas 等）
+  rawConnectionString?: string     // SRV 模式下保存原始连接字符串供 MongoClient 直接使用
 }
 
 // AI 服务类型

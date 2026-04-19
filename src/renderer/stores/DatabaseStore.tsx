@@ -40,6 +40,11 @@ export interface DatabaseConfig {
   username: string
   password?: string
   connected: boolean
+  // 连接选项
+  ssl?: boolean
+  sslRejectUnauthorized?: boolean
+  isSRV?: boolean
+  rawConnectionString?: string
   // 所属项目 id，默认为 'default'
   projectId?: string
   // 文件类型数据源的 schema 分析结果
@@ -59,19 +64,45 @@ export const DatabaseProvider: React.FC<{ children: ReactNode }> = ({ children }
   const [currentDatabase, setCurrentDatabase] = useState<DatabaseType>(DatabaseType.PostgreSQL)
   const [databases, setDatabases] = useState<DatabaseConfig[]>([])
 
-  // 初始化：从 localStorage 加载配置
+  // 初始化：从 localStorage 加载配置，密码从 electron-store 补充
   useEffect(() => {
-    loadDatabases()
+    loadDatabases()  // async，内部会 setDatabases
     loadCurrentDatabase()
   }, [])
 
-  const loadDatabases = () => {
+  // ─── 凭据安全存储（密码存 electron-store，不存 localStorage）────────────
+
+  const saveCredential = async (id: string, password: string) => {
+    try {
+      await (window as any).electronAPI?.store.set(`cred.${id}`, password)
+    } catch { /* 忽略，密码仍可在内存中使用 */ }
+  }
+
+  const loadCredential = async (id: string): Promise<string> => {
+    try {
+      return (await (window as any).electronAPI?.store.get(`cred.${id}`)) || ''
+    } catch { return '' }
+  }
+
+  const deleteCredential = async (id: string) => {
+    try {
+      await (window as any).electronAPI?.store.delete(`cred.${id}`)
+    } catch { /* 忽略 */ }
+  }
+
+  // ─── 数据库配置持久化（localStorage 只存非敏感字段）────────────────────
+
+  const loadDatabases = async () => {
     try {
       const saved = localStorage.getItem(DATABASE_STORE_KEY)
       if (saved) {
-        setDatabases(JSON.parse(saved))
+        const dbs: DatabaseConfig[] = JSON.parse(saved)
+        // 从 electron-store 补充密码（不出现在 localStorage）
+        const withPasswords = await Promise.all(
+          dbs.map(async (db) => ({ ...db, password: await loadCredential(db.id) }))
+        )
+        setDatabases(withPasswords)
       } else {
-        // 首次使用，保存默认配置
         setDatabases(defaultDatabases)
         saveDatabases(defaultDatabases)
       }
@@ -84,16 +115,16 @@ export const DatabaseProvider: React.FC<{ children: ReactNode }> = ({ children }
   const loadCurrentDatabase = () => {
     try {
       const saved = localStorage.getItem(CURRENT_DB_KEY)
-      if (saved) {
-        setCurrentDatabase(saved as DatabaseType)
-      }
+      if (saved) setCurrentDatabase(saved as DatabaseType)
     } catch (error) {
       console.error('加载当前数据库失败:', error)
     }
   }
 
+  // localStorage 只保存非敏感字段，密码单独存 electron-store
   const saveDatabases = (dbs: DatabaseConfig[]) => {
-    localStorage.setItem(DATABASE_STORE_KEY, JSON.stringify(dbs))
+    const sanitized = dbs.map(({ password: _pw, ...rest }) => rest)
+    localStorage.setItem(DATABASE_STORE_KEY, JSON.stringify(sanitized))
   }
 
   const setDatabaseType = (type: DatabaseType) => {
@@ -104,10 +135,12 @@ export const DatabaseProvider: React.FC<{ children: ReactNode }> = ({ children }
 
   const addDatabase = (config: DatabaseConfig | DatabaseConfig[]) => {
     const configs = Array.isArray(config) ? config : [config]
+    // 密码单独存 electron-store
+    configs.forEach(c => { if (c.password) saveCredential(c.id, c.password) })
     setDatabases(prev => {
       const newDatabases = [...prev, ...configs]
-      saveDatabases(newDatabases)
-      return newDatabases
+      saveDatabases(newDatabases)  // 不含密码的版本存 localStorage
+      return newDatabases  // 内存中保留密码供本次使用
     })
     notificationManager.success('添加成功', `${configs.length} 个数据源已添加`)
   }
@@ -116,17 +149,18 @@ export const DatabaseProvider: React.FC<{ children: ReactNode }> = ({ children }
     const newDatabases = databases.filter(db => db.id !== id)
     setDatabases(newDatabases)
     saveDatabases(newDatabases)
+    deleteCredential(id)  // 同时删除 electron-store 中的密码
 
-    // 如果删除的是当前数据库，切换到默认
     const removedDb = databases.find(db => db.id === id)
     if (removedDb && removedDb.type === currentDatabase) {
       setDatabaseType(DatabaseType.PostgreSQL)
     }
-
     notificationManager.success('删除成功', '数据库配置已删除')
   }
 
   const updateDatabase = (id: string, updates: Partial<DatabaseConfig>) => {
+    // 如果更新包含密码，单独存 electron-store
+    if (updates.password) saveCredential(id, updates.password)
     const newDatabases = databases.map(db =>
       db.id === id ? { ...db, ...updates } : db
     )

@@ -22,6 +22,10 @@ interface ConnectionTestProps {
     port: number
     database: string
     username: string
+    password?: string
+    ssl?: boolean
+    isSRV?: boolean
+    rawConnectionString?: string
   }
   onConfirm: () => void
   onBack: () => void
@@ -50,7 +54,10 @@ export const ConnectionTest: React.FC<ConnectionTestProps> = ({
         port: config.port,
         database: config.database,
         username: config.username,
-        password: ''
+        password: config.password || '',
+        ssl: config.ssl ?? false,
+        isSRV: config.isSRV ?? false,
+        rawConnectionString: config.rawConnectionString,
       })
 
       if (result.success) {

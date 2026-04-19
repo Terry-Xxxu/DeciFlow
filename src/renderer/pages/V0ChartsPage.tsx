@@ -349,6 +349,15 @@ function ChartRenderer({ config }: { config: ChartConfig }) {
   return <div className="flex items-center justify-center h-full text-muted-foreground">暂不支持此图表类型</div>
 }
 
+const chartTypeLabels: Record<ChartType, string> = {
+  line: '折线图',
+  bar: '柱状图',
+  pie: '饼图',
+  area: '面积图',
+  funnel: '漏斗图',
+  heatmap: '热力图',
+}
+
 interface V0Props {
   onNavigate?: (page: string) => void
 }
@@ -360,6 +369,8 @@ export function V0ChartsPage({ onNavigate }: V0Props) {
   const [editingChart, setEditingChart] = useState<ChartConfig | undefined>()
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [chartToDelete, setChartToDelete] = useState<ChartConfig | undefined>()
+  const [filterType, setFilterType] = useState<ChartType | 'all'>('all')
+  const [showFilter, setShowFilter] = useState(false)
 
   // 存储每个图表卡片的ref
   const chartRefs = useRef<Map<string, HTMLDivElement>>(new Map())
@@ -423,6 +434,9 @@ export function V0ChartsPage({ onNavigate }: V0Props) {
     }
   }
 
+  // 按类型筛选后的图表列表
+  const filteredCharts = filterType === 'all' ? charts : charts.filter(c => c.type === filterType)
+
   // 当没有数据源时显示空状态
   if (databases.length === 0) {
     return (
@@ -455,9 +469,13 @@ export function V0ChartsPage({ onNavigate }: V0Props) {
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => showToast("筛选功能即将推出", "info")}>
+          <Button
+            variant={showFilter ? "default" : "outline"}
+            size="sm"
+            onClick={() => setShowFilter(v => !v)}
+          >
             <Filter className="mr-2 h-4 w-4" />
-            筛选
+            筛选{filterType !== 'all' ? `：${chartTypeLabels[filterType]}` : ''}
           </Button>
           <Button size="sm" onClick={handleCreateChart}>
             <Plus className="mr-2 h-4 w-4" />
@@ -466,12 +484,48 @@ export function V0ChartsPage({ onNavigate }: V0Props) {
         </div>
       </div>
 
+      {/* 图表类型筛选器 */}
+      {showFilter && (
+        <div className="flex flex-wrap gap-2 items-center">
+          <span className="text-xs text-muted-foreground mr-1">图表类型：</span>
+          {(['all', ...Object.keys(chartTypeLabels)] as Array<'all' | ChartType>).map(type => {
+            const Icon = type !== 'all' ? chartTypeIcons[type] : null
+            return (
+              <button
+                key={type}
+                onClick={() => setFilterType(type)}
+                className={cn(
+                  "flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors border",
+                  filterType === type
+                    ? "bg-primary text-primary-foreground border-primary"
+                    : "bg-background text-muted-foreground border-border hover:border-primary/50 hover:text-foreground"
+                )}
+              >
+                {Icon && <Icon className="h-3 w-3" />}
+                {type === 'all' ? '全部' : chartTypeLabels[type]}
+              </button>
+            )
+          })}
+        </div>
+      )}
+
       {/* Empty State */}
-      {charts.length === 0 && <EmptyStates type="no-charts" />}
+      {charts.length === 0 && <EmptyStates type="no-charts" onAction={handleCreateChart} />}
+
+      {/* 筛选结果为空 */}
+      {charts.length > 0 && filteredCharts.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+          <Filter className="h-10 w-10 mb-3 opacity-30" />
+          <p className="text-sm">没有 {chartTypeLabels[filterType as ChartType]} 类型的图表</p>
+          <button onClick={() => setFilterType('all')} className="mt-2 text-xs text-primary hover:underline">
+            清除筛选
+          </button>
+        </div>
+      )}
 
       {/* Charts Grid */}
-      {charts.length > 0 && <div className="grid gap-6 lg:grid-cols-2">
-        {charts.map((chart) => {
+      {filteredCharts.length > 0 && <div className="grid gap-6 lg:grid-cols-2">
+        {filteredCharts.map((chart) => {
           const ChartIcon = chartTypeIcons[chart.type]
           return (
             <Card

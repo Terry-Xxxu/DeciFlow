@@ -41,6 +41,7 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
   const hasDataSource = connectedDatabases.length > 0
 
   const [isLoading, setIsLoading] = useState(false)
+  const [loadingStage, setLoadingStage] = useState<string>('')
   const [queryResult, setQueryResult] = useState<QueryResult | null>(null)
   const [queryError, setQueryError] = useState<string | null>(null)
   const [pendingQuery, setPendingQuery] = useState<string | undefined>(undefined)
@@ -107,6 +108,7 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
     const db = primaryDb
 
     setIsLoading(true)
+    setLoadingStage('正在生成 SQL…')
     setQueryError(null)
     setQueryResult(null)
     setChartRecommendation(null)
@@ -134,7 +136,6 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
       const sqlResult = await window.electronAPI.nl.generateSQL(db.type, query, nlContext)
 
       if (!sqlResult.success || !sqlResult.sql) {
-        // 区分"需要AI"的错误和其他错误
         if (sqlResult.needsAI) {
           throw new Error(sqlResult.message || "此查询需要 AI 支持，请前往设置配置 API Key")
         }
@@ -144,16 +145,17 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
       const generatedSQL = sqlResult.sql
 
       // Step 2: SQL 安全校验
+      setLoadingStage('安全校验中…')
       const validation = await window.electronAPI.sql.validate(generatedSQL)
       const finalSQL = validation.fixedSQL || generatedSQL
 
       // Step 3: 执行查询
+      setLoadingStage('正在查询数据库…')
       const dbResult = await window.electronAPI.database.query(db, finalSQL)
       if (!dbResult.success) {
         throw new Error(dbResult.error || "查询执行失败")
       }
 
-      // handler 可能将数据包在 data 字段里，也可能直接展开
       const resultData = dbResult.data || dbResult
       const duration = Date.now() - startTime
       const result: QueryResult = {
@@ -164,16 +166,16 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
         sql: finalSQL,
       }
       setQueryResult(result)
+      setLoadingStage('')
 
-      // Step 4: 图表推荐（异步）
-      window.electronAPI.charts.recommend(resultData).then((rec: any) => {
-        if (rec?.type) setChartRecommendation(rec)
-      }).catch(() => {})
+      // Step 4 + 5: 图表推荐 & AI 洞察并行执行
+      const chartPromise = window.electronAPI.charts.recommend(resultData)
+        .then((rec: any) => { if (rec?.type) setChartRecommendation(rec) })
+        .catch((err: any) => console.warn('图表推荐失败:', err?.message))
 
-      // Step 5: AI 洞察（仅在 AI 已配置时）
-      if (hasAI) {
+      const insightPromise = hasAI ? (() => {
         setIsInsightLoading(true)
-        window.electronAPI.ai.chat(
+        return window.electronAPI.ai.chat(
           `根据以下查询结果给出3条简短的数据洞察，每条不超过40字，直接返回JSON数组格式：[{"title":"...","content":"...","type":"trend|warning|suggestion"}]\n\n查询：${query}\n数据行数：${result.rowCount}\nSQL：${finalSQL}`,
         ).then((res: any) => {
           try {
@@ -183,16 +185,22 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
               const parsed = JSON.parse(match[0])
               setAiInsights(Array.isArray(parsed) ? parsed.slice(0, 3) : [])
             }
-          } catch {
-            // 解析失败静默处理
+          } catch (parseErr) {
+            console.warn('AI 洞察解析失败:', parseErr)
           }
-        }).catch(() => {}).finally(() => setIsInsightLoading(false))
-      }
+        }).catch((err: any) => {
+          console.warn('AI 洞察生成失败:', err?.message)
+        }).finally(() => setIsInsightLoading(false))
+      })() : Promise.resolve()
+
+      // 并行等待（不阻塞主流程，已通过 setQueryResult 展示结果）
+      Promise.allSettled([chartPromise, insightPromise])
 
       addQueryToHistory(query, "success", result.rowCount, `${duration}ms`)
     } catch (err: any) {
       const errorMsg = err?.message || "查询失败"
       setQueryError(errorMsg)
+      setLoadingStage('')
       addQueryToHistory(query, "error")
       showToast(errorMsg, "error")
     } finally {
@@ -332,6 +340,14 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
         pendingQuery={pendingQuery}
         onPendingQueryConsumed={() => setPendingQuery(undefined)}
       />
+
+      {/* 查询阶段提示 */}
+      {isLoading && loadingStage && (
+        <div className="flex items-center gap-2 px-1 text-sm text-muted-foreground animate-pulse">
+          <span className="inline-block w-2 h-2 rounded-full bg-blue-500 animate-ping" />
+          {loadingStage}
+        </div>
+      )}
 
       {!hasDataSource ? (
         <EmptyStates type="no-datasource" onAction={() => onNavigate?.('datasources')} />

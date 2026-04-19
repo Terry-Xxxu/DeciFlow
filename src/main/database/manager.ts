@@ -3,7 +3,7 @@
  * 支持 PostgreSQL、MySQL、MongoDB、SQLite、Redis、ClickHouse 等
  */
 
-import { Pool, PoolConfig, PoolClient, QueryResult as PGQueryResult, FieldDef } from 'pg'
+import { Pool, PoolConfig, Client as PgClient } from 'pg'
 import mysql from 'mysql2/promise'
 import { MongoClient, Db } from 'mongodb'
 import Database from 'better-sqlite3'
@@ -13,6 +13,42 @@ import { DatabaseConfig, DatabaseType } from '../../shared/types'
 import { sqlSecurityValidator } from '../security/sql-validator'
 import * as fs from 'fs'
 import * as path from 'path'
+import * as http from 'http'
+import * as net from 'net'
+
+// ─── 代理工具 ─────────────────────────────────────────────────────────────────
+/** 从环境变量读取 HTTP 代理配置（WSL2 等环境常见） */
+function getProxyConfig(): { host: string; port: number } | null {
+  const raw = process.env.https_proxy || process.env.HTTPS_PROXY ||
+              process.env.http_proxy  || process.env.HTTP_PROXY
+  if (!raw) return null
+  try {
+    const u = new URL(raw)
+    return { host: u.hostname, port: parseInt(u.port || '8080') }
+  } catch { return null }
+}
+
+/** 通过 HTTP CONNECT 代理建立 TCP 隧道 */
+function createTunnelSocket(
+  proxy: { host: string; port: number },
+  target: { host: string; port: number }
+): Promise<net.Socket> {
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      host: proxy.host,
+      port: proxy.port,
+      method: 'CONNECT',
+      path: `${target.host}:${target.port}`,
+      headers: { Host: `${target.host}:${target.port}` },
+    })
+    req.on('connect', (res, socket) => {
+      if (res.statusCode === 200) resolve(socket)
+      else reject(new Error(`Proxy CONNECT failed: HTTP ${res.statusCode}`))
+    })
+    req.on('error', reject)
+    req.end()
+  })
+}
 
 export interface QueryResult {
   columns: string[]
@@ -46,48 +82,89 @@ abstract class DatabaseConnection {
 }
 
 /**
- * PostgreSQL 连接
+ * PostgreSQL 连接（支持 HTTP CONNECT 代理，适用于 WSL2 / 企业网络等环境）
  */
 class PostgreSQLConnection extends DatabaseConnection {
   private pool?: Pool
+  private singleClient?: PgClient  // 代理模式下使用单连接
 
-  async connect(): Promise<void> {
-    const poolConfig: PoolConfig = {
+  /** 构建通用 pg 连接参数 */
+  private buildClientConfig() {
+    return {
       host: this.config.host,
       port: this.config.port,
       database: this.config.database,
       user: this.config.username,
       password: this.config.password,
-      max: 5,
-      idleTimeoutMillis: 30000,
-      connectionTimeoutMillis: 2000,
+      connectionTimeoutMillis: 12000,
+      ssl: this.config.ssl
+        ? { rejectUnauthorized: this.config.sslRejectUnauthorized ?? false }
+        : undefined,
+    }
+  }
+
+  /** 检测是否为本地地址 */
+  private isLocal() {
+    const h = this.config.host
+    return !h || h === 'localhost' || h === '127.0.0.1' || h === '::1'
+  }
+
+  async connect(): Promise<void> {
+    const proxy = getProxyConfig()
+
+    // 存在代理且不是本地连接 → 通过 HTTP CONNECT 隧道
+    if (proxy && !this.isLocal()) {
+      const socket = await createTunnelSocket(proxy, { host: this.config.host, port: this.config.port })
+      const cfg = this.buildClientConfig()
+      // pg.Client 支持 stream 选项接入自定义 socket
+      this.singleClient = new PgClient({ ...cfg, stream: socket as any })
+      try {
+        await this.singleClient.connect()
+        this.isConnected = true
+      } catch (error) {
+        await this.singleClient.end().catch(() => {})
+        this.singleClient = undefined
+        this.isConnected = false
+        throw error
+      }
+      return
     }
 
-    this.pool = new Pool(poolConfig)
-
+    // 无代理 → 使用连接池（更高效）
+    this.pool = new Pool({ ...this.buildClientConfig(), max: 5, idleTimeoutMillis: 30000 })
     try {
       const client = await this.pool.connect()
       client.release()
       this.isConnected = true
     } catch (error) {
+      await this.pool.end().catch(() => {})
+      this.pool = undefined
       this.isConnected = false
       throw error
     }
   }
 
   async disconnect(): Promise<void> {
-    if (this.pool) {
-      await this.pool.end()
-      this.pool = undefined
-      this.isConnected = false
+    if (this.singleClient) {
+      await this.singleClient.end().catch(() => {})
+      this.singleClient = undefined
     }
+    if (this.pool) {
+      await this.pool.end().catch(() => {})
+      this.pool = undefined
+    }
+    this.isConnected = false
   }
 
   async testConnection(): Promise<boolean> {
     try {
-      const client = await this.pool!.connect()
-      await client.query('SELECT 1')
-      client.release()
+      if (this.singleClient) {
+        await this.singleClient.query('SELECT 1')
+      } else {
+        const client = await this.pool!.connect()
+        await client.query('SELECT 1')
+        client.release()
+      }
       return true
     } catch {
       return false
@@ -95,35 +172,27 @@ class PostgreSQLConnection extends DatabaseConnection {
   }
 
   async query(sql: string): Promise<QueryResult> {
-    if (!this.pool || !this.isConnected) {
+    if (!this.isConnected || (!this.pool && !this.singleClient)) {
       throw new Error('数据库未连接')
     }
 
-    // SQL 安全验证
     const validation = sqlSecurityValidator.validate(sql)
     if (!validation.isValid) {
       throw new Error(`SQL 安全验证失败：${validation.errors.join(', ')}`)
     }
-
-    // 使用修复后的 SQL（如果有）
     const querySQL = validation.fixedSQL || sql
-
     const startTime = Date.now()
 
     try {
-      const result = await this.pool.query(querySQL)
-      const executionTime = Date.now() - startTime
+      const result = this.singleClient
+        ? await this.singleClient.query(querySQL)
+        : await this.pool!.query(querySQL)
 
-      const columns = result.fields.map((f: FieldDef) => f.name)
+      const executionTime = Date.now() - startTime
+      const columns = result.fields.map((f: any) => f.name)
       const rows = result.rows
 
-      return {
-        columns,
-        rows,
-        executionTime,
-        rowCount: rows.length,
-        warnings: validation.warnings,  // 添加安全警告
-      }
+      return { columns, rows, executionTime, rowCount: rows.length, warnings: validation.warnings }
     } catch (error) {
       throw new Error(`查询失败: ${error instanceof Error ? error.message : '未知错误'}`)
     }
@@ -157,6 +226,8 @@ class MySQLConnection extends DatabaseConnection {
       waitForConnections: true,
       connectionLimit: 5,
       queueLimit: 0,
+      // SSL 支持：PlanetScale、TiDB Cloud、Railway、RDS 等需要
+      ssl: this.config.ssl ? { rejectUnauthorized: this.config.sslRejectUnauthorized ?? false } : undefined,
     })
 
     try {
@@ -233,13 +304,24 @@ class MongoDBConnection extends DatabaseConnection {
   private db?: Db
 
   async connect(): Promise<void> {
-    const uri = `mongodb://${this.config.username}:${this.config.password}@${this.config.host}:${this.config.port}`
-
-    this.client = new MongoClient(uri, {
+    const cfg = this.config as any
+    const clientOptions = {
       maxPoolSize: 5,
-      serverSelectionTimeoutMS: 2000,
+      serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 30000,
-    })
+    }
+
+    if (cfg.isSRV && cfg.rawConnectionString) {
+      // mongodb+srv:// — Atlas、Cosmos DB 等，必须用完整 URI（含 DNS SRV 解析）
+      this.client = new MongoClient(cfg.rawConnectionString, clientOptions)
+    } else {
+      // 普通连接，auth 对象方式避免密码出现在日志里
+      this.client = new MongoClient(`mongodb://${this.config.host}:${this.config.port}`, {
+        ...clientOptions,
+        auth: { username: this.config.username, password: this.config.password },
+        tls: this.config.ssl,
+      })
+    }
 
     try {
       await this.client.connect()
@@ -518,12 +600,138 @@ class ClickHouseConnection extends DatabaseConnection {
   }
 
   async getTables(): Promise<string[]> {
+    // 对数据库名做白名单过滤，防止 SQL 注入
+    const safeName = String(this.config.database).replace(/[^a-zA-Z0-9_\-]/g, '')
+    if (!safeName) throw new Error('数据库名称无效')
     const result = await this.query(`
       SELECT name FROM system.tables
-      WHERE database = '${this.config.database}'
+      WHERE database = '${safeName}'
       ORDER BY name
     `)
     return result.rows.map((row: any) => row.name)
+  }
+}
+
+// ─── Demo（内置示例数据）连接 ─────────────────────────────────────────────────
+/**
+ * 内置电商示例数据库（SQLite 内存数据库，随 app 启动即可使用）
+ */
+class DemoConnection extends DatabaseConnection {
+  private db: InstanceType<typeof Database> | null = null
+
+  async connect(): Promise<void> {
+    this.db = new Database(':memory:')
+
+    // 建表
+    this.db.exec(`
+      CREATE TABLE users (
+        id INTEGER PRIMARY KEY, name TEXT, email TEXT,
+        channel TEXT, city TEXT, status TEXT, created_at TEXT
+      );
+      CREATE TABLE orders (
+        id INTEGER PRIMARY KEY, user_id INTEGER, amount REAL,
+        status TEXT, product_category TEXT, created_at TEXT
+      );
+      CREATE TABLE products (
+        id INTEGER PRIMARY KEY, name TEXT, category TEXT,
+        price REAL, stock INTEGER
+      );
+      CREATE TABLE events (
+        id INTEGER PRIMARY KEY, user_id INTEGER,
+        event_type TEXT, page TEXT, created_at TEXT
+      );
+    `)
+
+    const channels = ['organic','paid','referral','social','email']
+    const cities   = ['北京','上海','广州','深圳','杭州','成都','武汉','西安']
+    const statuses = ['active','inactive','churned']
+    const categories = ['电子产品','服装','食品','美妆','家居','运动']
+    const eventTypes = ['view','click','add_cart','purchase','login','logout']
+    const pages = ['home','product','cart','checkout','profile','search']
+
+    const insert = this.db.transaction(() => {
+      const uStmt = this.db!.prepare(
+        'INSERT INTO users VALUES (?,?,?,?,?,?,?)'
+      )
+      for (let i = 1; i <= 500; i++) {
+        const d = new Date(2023, Math.floor(Math.random()*12), Math.floor(Math.random()*28)+1)
+        uStmt.run(
+          i, `用户${i}`, `user${i}@example.com`,
+          channels[i % channels.length],
+          cities[i % cities.length],
+          statuses[i % statuses.length],
+          d.toISOString().slice(0,10)
+        )
+      }
+
+      const pStmt = this.db!.prepare(
+        'INSERT INTO products VALUES (?,?,?,?,?)'
+      )
+      const productNames = [
+        '智能手机','笔记本电脑','蓝牙耳机','机械键盘','显示器',
+        '休闲T恤','运动裤','连衣裙','羽绒服','牛仔裤',
+        '有机大米','进口咖啡','坚果礼盒','红酒','绿茶',
+        '保湿面霜','口红套装','香水','防晒霜','洗发水',
+      ]
+      productNames.forEach((name, i) => {
+        pStmt.run(i+1, name, categories[Math.floor(i/4)], Math.round(50+Math.random()*500), Math.floor(10+Math.random()*200))
+      })
+
+      const oStmt = this.db!.prepare(
+        'INSERT INTO orders VALUES (?,?,?,?,?,?)'
+      )
+      const orderStatuses = ['completed','pending','refunded','cancelled']
+      for (let i = 1; i <= 2000; i++) {
+        const d = new Date(2023, Math.floor(Math.random()*12), Math.floor(Math.random()*28)+1)
+        oStmt.run(
+          i, Math.floor(Math.random()*500)+1,
+          Math.round((50+Math.random()*2000)*100)/100,
+          orderStatuses[i % orderStatuses.length],
+          categories[i % categories.length],
+          d.toISOString().slice(0,10)
+        )
+      }
+
+      const eStmt = this.db!.prepare(
+        'INSERT INTO events VALUES (?,?,?,?,?)'
+      )
+      for (let i = 1; i <= 5000; i++) {
+        const d = new Date(2023, Math.floor(Math.random()*12), Math.floor(Math.random()*28)+1)
+        eStmt.run(
+          i, Math.floor(Math.random()*500)+1,
+          eventTypes[i % eventTypes.length],
+          pages[i % pages.length],
+          d.toISOString().slice(0,19).replace('T',' ')
+        )
+      }
+    })
+    insert()
+    this.isConnected = true
+  }
+
+  async disconnect(): Promise<void> {
+    this.db?.close()
+    this.db = null
+    this.isConnected = false
+  }
+
+  async testConnection(): Promise<boolean> { return true }
+
+  async query(sql: string): Promise<QueryResult> {
+    if (!this.db) throw new Error('Demo 数据库未连接')
+    const start = Date.now()
+    try {
+      const stmt = this.db.prepare(sql)
+      const rows = stmt.all() as Record<string, any>[]
+      const columns = rows.length > 0 ? Object.keys(rows[0]) : []
+      return { columns, rows, executionTime: Date.now() - start, rowCount: rows.length }
+    } catch (e: any) {
+      throw new Error(`Demo 查询失败: ${e.message}`)
+    }
+  }
+
+  async getTables(): Promise<string[]> {
+    return ['users', 'orders', 'products', 'events']
   }
 }
 
@@ -573,6 +781,10 @@ export class DatabaseManager {
       case DatabaseType.BigQuery:
         throw new Error('BigQuery 支持开发中，请稍后再试')
       default:
+        if ((config.type as string) === 'demo') {
+          connection = new DemoConnection(config)
+          break
+        }
         throw new Error(`不支持的数据库类型: ${config.type}`)
     }
 
@@ -608,23 +820,58 @@ export class DatabaseManager {
   }
 
   /**
-   * 测试数据库连接
+   * 测试数据库连接（临时连接，不保存到 connections）
    */
   async testConnection(config: DatabaseConfig): Promise<boolean> {
     const connectionId = this.getConnectionId(config)
-    const connection = this.connections.get(connectionId)
 
-    if (!connection) {
-      throw new Error('数据库连接不存在')
+    // 如果已有持久连接，直接复用
+    const existing = this.connections.get(connectionId)
+    if (existing) {
+      return await existing.testConnection()
     }
 
-    return await connection.testConnection()
+    // 创建临时连接测试，完成后立即断开
+    const tempConn = this.buildConnection(config)
+    try {
+      await tempConn.connect()
+      return await tempConn.testConnection()
+    } finally {
+      await tempConn.disconnect().catch(() => {})
+    }
+  }
+
+  /** 根据类型构造连接实例（不保存，供临时测试用）*/
+  private buildConnection(config: DatabaseConfig): DatabaseConnection {
+    switch (config.type) {
+      case DatabaseType.PostgreSQL: return new PostgreSQLConnection(config)
+      case DatabaseType.MySQL:      return new MySQLConnection(config)
+      case DatabaseType.MongoDB:    return new MongoDBConnection(config)
+      case DatabaseType.SQLite:     return new SQLiteConnection(config)
+      case DatabaseType.Redis:      return new RedisConnection(config)
+      case DatabaseType.ClickHouse: return new ClickHouseConnection(config)
+      default:
+        if ((config.type as string) === 'demo') return new DemoConnection(config)
+        throw new Error(`不支持的数据库类型: ${config.type}`)
+    }
+  }
+
+  /** Demo 数据库懒加载：首次访问时自动建连接并缓存 */
+  private async ensureDemoConnection(config: DatabaseConfig): Promise<void> {
+    if ((config.type as string) !== 'demo') return
+    const connectionId = this.getConnectionId(config)
+    if (!this.connections.has(connectionId)) {
+      const conn = new DemoConnection(config)
+      await conn.connect()
+      this.connections.set(connectionId, conn)
+    }
   }
 
   /**
    * 执行查询
    */
   async query(config: DatabaseConfig, sql: string): Promise<QueryResult> {
+    await this.ensureDemoConnection(config)
     const connection = this.getConnection(config)
     return await connection.query(sql)
   }
@@ -633,6 +880,7 @@ export class DatabaseManager {
    * 获取数据库表列表
    */
   async getTables(config: DatabaseConfig): Promise<string[]> {
+    await this.ensureDemoConnection(config)
     const connection = this.getConnection(config)
     return await connection.getTables()
   }

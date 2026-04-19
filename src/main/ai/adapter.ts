@@ -31,6 +31,14 @@ abstract class AIServiceBase {
   }
 
   abstract chat(messages: ChatMessage[]): Promise<ChatResponse>
+
+  // 流式输出：onChunk 每收到一段就回调，返回完整内容
+  async chatStream(messages: ChatMessage[], onChunk: (chunk: string) => void): Promise<ChatResponse> {
+    // 默认回退到非流式
+    const result = await this.chat(messages)
+    onChunk(result.content)
+    return result
+  }
 }
 
 /**
@@ -48,10 +56,7 @@ class OpenAIService extends AIServiceBase {
       },
       body: JSON.stringify({
         model: this.config.model,
-        messages: messages.map(m => ({
-          role: m.role,
-          content: m.content,
-        })),
+        messages: messages.map(m => ({ role: m.role, content: m.content })),
         temperature: 0.7,
         max_tokens: 2000,
       }),
@@ -72,6 +77,53 @@ class OpenAIService extends AIServiceBase {
       },
     }
   }
+
+  override async chatStream(messages: ChatMessage[], onChunk: (chunk: string) => void): Promise<ChatResponse> {
+    const baseURL = this.config.baseURL || 'https://api.openai.com/v1'
+
+    const response = await fetch(`${baseURL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${this.config.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: this.config.model,
+        messages: messages.map(m => ({ role: m.role, content: m.content })),
+        temperature: 0.7,
+        max_tokens: 2000,
+        stream: true,
+      }),
+    })
+
+    if (!response.ok) {
+      const error = await response.text()
+      throw new Error(`OpenAI API error: ${error}`)
+    }
+
+    let fullContent = ''
+    const reader = response.body!.getReader()
+    const decoder = new TextDecoder()
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      const lines = decoder.decode(value).split('\n')
+      for (const line of lines) {
+        if (!line.startsWith('data: ') || line === 'data: [DONE]') continue
+        try {
+          const delta = JSON.parse(line.slice(6))?.choices?.[0]?.delta?.content
+          if (delta) {
+            fullContent += delta
+            onChunk(delta)
+          }
+        } catch { /* 跳过解析失败的行 */ }
+      }
+    }
+
+    return { content: fullContent }
+  }
 }
 
 /**
@@ -80,8 +132,6 @@ class OpenAIService extends AIServiceBase {
 class ClaudeService extends AIServiceBase {
   async chat(messages: ChatMessage[]): Promise<ChatResponse> {
     const baseURL = this.config.baseURL || 'https://api.anthropic.com/v1'
-
-    // Claude 需要特殊处理 system 消息
     const systemMessage = messages.find(m => m.role === 'system')
     const chatMessages = messages.filter(m => m.role !== 'system')
 
@@ -95,10 +145,7 @@ class ClaudeService extends AIServiceBase {
       body: JSON.stringify({
         model: this.config.model,
         system: systemMessage?.content || AI_SYSTEM_PROMPT,
-        messages: chatMessages.map(m => ({
-          role: m.role,
-          content: m.content,
-        })),
+        messages: chatMessages.map(m => ({ role: m.role, content: m.content })),
         max_tokens: 2000,
       }),
     })
@@ -116,6 +163,65 @@ class ClaudeService extends AIServiceBase {
         completionTokens: data.usage?.output_tokens || 0,
         totalTokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0),
       },
+    }
+  }
+
+  override async chatStream(messages: ChatMessage[], onChunk: (chunk: string) => void): Promise<ChatResponse> {
+    const baseURL = this.config.baseURL || 'https://api.anthropic.com/v1'
+    const systemMessage = messages.find(m => m.role === 'system')
+    const chatMessages = messages.filter(m => m.role !== 'system')
+
+    const response = await fetch(`${baseURL}/messages`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': this.config.apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: this.config.model,
+        system: systemMessage?.content || AI_SYSTEM_PROMPT,
+        messages: chatMessages.map(m => ({ role: m.role, content: m.content })),
+        max_tokens: 2000,
+        stream: true,
+      }),
+    })
+
+    if (!response.ok) {
+      const error = await response.text()
+      throw new Error(`Claude API error: ${error}`)
+    }
+
+    let fullContent = ''
+    let inputTokens = 0
+    let outputTokens = 0
+    const reader = response.body!.getReader()
+    const decoder = new TextDecoder()
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      const lines = decoder.decode(value).split('\n')
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue
+        try {
+          const event = JSON.parse(line.slice(6))
+          if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+            fullContent += event.delta.text
+            onChunk(event.delta.text)
+          } else if (event.type === 'message_delta' && event.usage) {
+            outputTokens = event.usage.output_tokens || 0
+          } else if (event.type === 'message_start' && event.message?.usage) {
+            inputTokens = event.message.usage.input_tokens || 0
+          }
+        } catch { /* 跳过解析失败的行 */ }
+      }
+    }
+
+    return {
+      content: fullContent,
+      usage: { promptTokens: inputTokens, completionTokens: outputTokens, totalTokens: inputTokens + outputTokens },
     }
   }
 }
@@ -238,35 +344,41 @@ export class AIChatManager {
   }
 
   /**
-   * 发送消息并获取回复
+   * 发送消息并获取回复（非流式）
    */
   async chat(userMessage: string, context?: {
     dataSource?: string
     recentQueries?: string[]
   }): Promise<ChatResponse> {
-    // 构建带上下文的用户消息
     const prompt = getChatPrompt(userMessage, context)
+    this.conversationHistory.push({ role: 'user', content: prompt })
 
-    // 添加用户消息到历史
-    this.conversationHistory.push({
-      role: 'user',
-      content: prompt,
-    })
-
-    // 调用 AI 服务
     const response = await this.service.chat(this.conversationHistory)
 
-    // 添加 AI 回复到历史
-    this.conversationHistory.push({
-      role: 'assistant',
-      content: response.content,
-    })
-
-    // 保持历史记录在合理范围内（最近20条）
+    this.conversationHistory.push({ role: 'assistant', content: response.content })
     if (this.conversationHistory.length > 20) {
       this.conversationHistory = this.conversationHistory.slice(-20)
     }
+    return response
+  }
 
+  /**
+   * 发送消息并流式输出（逐字回调，响应更快）
+   */
+  async chatStream(
+    userMessage: string,
+    onChunk: (chunk: string) => void,
+    context?: { dataSource?: string; recentQueries?: string[] }
+  ): Promise<ChatResponse> {
+    const prompt = getChatPrompt(userMessage, context)
+    this.conversationHistory.push({ role: 'user', content: prompt })
+
+    const response = await this.service.chatStream(this.conversationHistory, onChunk)
+
+    this.conversationHistory.push({ role: 'assistant', content: response.content })
+    if (this.conversationHistory.length > 20) {
+      this.conversationHistory = this.conversationHistory.slice(-20)
+    }
     return response
   }
 

@@ -33,6 +33,38 @@ const dbConnectionManager = new DatabaseConnectionManager()
 const appStore = new Store()
 
 let mainWindow: BrowserWindow | null = null
+
+// ─── IPC 安全工具函数 ────────────────────────────────────────────────────────
+
+/** 验证字符串输入长度，防止超大请求导致主进程 OOM */
+function guardString(value: unknown, maxLen: number, name: string): string {
+  if (typeof value !== 'string') throw new Error(`${name} 必须是文本`)
+  if (value.length > maxLen) throw new Error(`${name} 超过最大长度 ${maxLen} 字符`)
+  return value
+}
+
+/** 对返回前端的错误信息脱敏，防止暴露内部路径/凭据 */
+function sanitizeError(error: unknown): string {
+  if (!(error instanceof Error)) return '操作失败'
+  const msg = error.message
+  // 过滤包含文件路径或过长的错误信息
+  if (msg.length > 300) return msg.slice(0, 300) + '…'
+  // 过滤路径信息（可能暴露服务器内部结构）
+  if (/\/[a-z]+\/[a-z]+|C:\\|\/etc\/|\/var\//.test(msg)) return '数据库连接失败，请检查连接配置'
+  return msg
+}
+
+/** 验证数据库配置基本结构 */
+function guardDbConfig(config: unknown): DatabaseConfig {
+  if (!config || typeof config !== 'object') throw new Error('数据库配置无效')
+  const c = config as any
+  const VALID_TYPES = ['postgresql', 'mysql', 'mongodb', 'clickhouse', 'redis', 'sqlite']
+  if (!VALID_TYPES.includes(c.type)) throw new Error(`不支持的数据库类型: ${c.type}`)
+  if (c.host && (typeof c.host !== 'string' || c.host.length > 255 || /[\n\r]/.test(c.host))) {
+    throw new Error('主机地址格式无效')
+  }
+  return config as DatabaseConfig
+}
 let aiChatManager: AIChatManager | null = null
 let nl2sqlService: NaturalLanguageQueryService | null = null
 let insightsEngine: InsightsEngine | null = null
@@ -195,13 +227,15 @@ ipcMain.handle('ai:chat', async (_, message: string, context?: any) => {
   if (!aiChatManager) {
     throw new Error('AI 服务未初始化，请先配置 API Key')
   }
+  guardString(message, 8000, '消息内容')
+  if (context !== undefined && typeof context !== 'object') throw new Error('context 参数无效')
 
   try {
     const response = await aiChatManager.chat(message, context)
     return response
   } catch (error) {
     console.error('AI 对话错误:', error)
-    throw error
+    throw new Error(sanitizeError(error))
   }
 })
 
@@ -243,6 +277,7 @@ ipcMain.handle('ai:test', async (_, config: any) => {
 ipcMain.handle('db:connect', async (_, config: DatabaseConfig) => {
   const startTime = Date.now()
   try {
+    guardDbConfig(config)
     await databaseManager.createConnection(config)
     const executionTime = Date.now() - startTime
 
@@ -278,7 +313,7 @@ ipcMain.handle('db:connect', async (_, config: DatabaseConfig) => {
 
     return {
       success: false,
-      message: errorMessage
+      message: sanitizeError(error)  // 返回脱敏后的错误，内部完整错误已记录审计日志
     }
   }
 })
@@ -379,17 +414,14 @@ ipcMain.handle('db:query', async (_, config: DatabaseConfig, sql: string) => {
   }
 })
 
-// 获取数据库表列表
+// 获取数据库表列表（直接返回数组，与渲染端期望格式一致）
 ipcMain.handle('db:tables', async (_, config: DatabaseConfig) => {
   try {
     const tables = await databaseManager.getTables(config)
-    return { success: true, data: tables }
+    return tables
   } catch (error) {
-    return {
-      success: false,
-      message: error instanceof Error ? error.message : '获取表列表失败',
-      data: []
-    }
+    console.error('[db:tables] 获取表列表失败:', error)
+    return []
   }
 })
 
@@ -497,6 +529,8 @@ ipcMain.handle('schema:describe', async (_, config: any) => {
 
 // 自然语言转 SQL
 ipcMain.handle('nl:generate-sql', async (_, databaseType: any, query: string, context?: any) => {
+  guardString(query, 2000, '查询内容')
+  if (context !== undefined && typeof context !== 'object') throw new Error('context 参数无效')
   const selectedTables: string[] = context?.selectedTables || []
 
   // ── 有 AI：全功能路径 ──────────────────────────────────────────
@@ -2131,19 +2165,34 @@ ipcMain.handle('dialog:openFile', async (_, options?: any) => {
 // 读取文件内容（主进程有 fs 访问权限）
 ipcMain.handle('file:read', async (_, filePath: string) => {
   try {
-    const stats = fs.statSync(filePath)
-    const content = fs.readFileSync(filePath, 'utf-8')
+    guardString(filePath, 1000, '文件路径')
+
+    // 路径遍历防护：规范化路径，禁止访问用户目录之外
+    const resolved = path.resolve(filePath)
+    const allowedRoots = [app.getPath('home'), app.getPath('downloads'), app.getPath('documents'), app.getPath('temp')]
+    const isAllowed = allowedRoots.some(root => resolved.startsWith(root))
+    if (!isAllowed) {
+      return { success: false, error: '无权限访问该路径' }
+    }
+
+    // 文件大小限制：50MB
+    const stats = fs.statSync(resolved)
+    if (stats.size > 50 * 1024 * 1024) {
+      return { success: false, error: '文件超过 50MB 限制' }
+    }
+
+    const content = fs.readFileSync(resolved, 'utf-8')
     return {
       success: true,
       content,
       size: stats.size,
-      name: path.basename(filePath),
-      path: filePath,
+      name: path.basename(resolved),
+      path: resolved,
     }
   } catch (error) {
     return {
       success: false,
-      error: error instanceof Error ? error.message : '读取文件失败',
+      error: sanitizeError(error),
     }
   }
 })
@@ -2182,12 +2231,21 @@ ipcMain.handle('table:get-template-library', () => {
   }
 })
 
-// 批量分析多张表并汇总匹配到的模板
+// 批量分析多张表并汇总匹配到的模板（限制并发数，防止 CPU 过载）
 ipcMain.handle('table:batch-analyze', async (_, tables: Array<{ filePath: string; fileName: string }>) => {
   try {
-    const results = await Promise.all(
-      tables.map(t => analyzeTableSchema(t.fileName, '', aiChatManager))
-    )
+    const CONCURRENCY = 3  // 同时最多 3 个 AI 请求
+    const results: any[] = new Array(tables.length)
+    let index = 0
+
+    async function runNext(): Promise<void> {
+      if (index >= tables.length) return
+      const i = index++
+      results[i] = await analyzeTableSchema(tables[i].fileName, '', aiChatManager)
+      await runNext()
+    }
+
+    await Promise.all(Array.from({ length: Math.min(CONCURRENCY, tables.length) }, runNext))
     return { success: true, data: results }
   } catch (error) {
     return {

@@ -3,7 +3,7 @@
  * 支持 PostgreSQL/MySQL/MongoDB 切换
  */
 
-import React, { useState } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { useDatabase } from '../../stores/DatabaseStore'
 import { useTheme } from '../../contexts/ThemeContext'
 import { DatabaseType } from '../../types/database'
@@ -19,6 +19,16 @@ export const DatabaseSelector: React.FC<DatabaseSelectorProps> = ({ compact = fa
   const [isOpen, setIsOpen] = useState(false)
   const [testingStatus, setTestingStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle')
   const isDark = mode === 'dark'
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // 组件卸载时清理定时器，防止内存泄漏
+  useEffect(() => () => { if (resetTimer.current) clearTimeout(resetTimer.current) }, [])
+
+  const setStatusWithReset = (status: 'success' | 'error') => {
+    if (resetTimer.current) clearTimeout(resetTimer.current)
+    setTestingStatus(status)
+    resetTimer.current = setTimeout(() => setTestingStatus('idle'), 2000)
+  }
 
   const dbConfig: Record<string, { icon: React.ReactNode; name: string; color: string; defaultPort: number }> = {
     postgresql: { icon: <Server className="w-4 h-4" />,   name: 'PostgreSQL', color: 'bg-blue-500/20 text-blue-400',   defaultPort: 5432  },
@@ -48,15 +58,12 @@ export const DatabaseSelector: React.FC<DatabaseSelectorProps> = ({ compact = fa
       })
 
       if (result.success) {
-        setTestingStatus('success')
-        setTimeout(() => setTestingStatus('idle'), 2000)
+        setStatusWithReset('success')
       } else {
-        setTestingStatus('error')
-        setTimeout(() => setTestingStatus('idle'), 2000)
+        setStatusWithReset('error')
       }
-    } catch (error) {
-      setTestingStatus('error')
-      setTimeout(() => setTestingStatus('idle'), 2000)
+    } catch {
+      setStatusWithReset('error')
     }
   }
 
@@ -80,15 +87,12 @@ export const DatabaseSelector: React.FC<DatabaseSelectorProps> = ({ compact = fa
         })
 
         if (result.success) {
-          setTestingStatus('success')
-          setTimeout(() => setTestingStatus('idle'), 2000)
+          setStatusWithReset('success')
         } else {
-          setTestingStatus('error')
-          setTimeout(() => setTestingStatus('idle'), 2000)
+          setStatusWithReset('error')
         }
-      } catch (error) {
-        setTestingStatus('error')
-        setTimeout(() => setTestingStatus('idle'), 2000)
+      } catch {
+        setStatusWithReset('error')
       }
     }
   }

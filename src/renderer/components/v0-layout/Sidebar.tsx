@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react"
 import { cn } from "../../lib/utils"
 import {
-  Search,
+  Home,
   BarChart3,
   Database,
   Settings,
@@ -27,7 +27,7 @@ interface SidebarProps {
 }
 
 const navItems = [
-  { id: "query", icon: Search, label: "查询", badge: null },
+  { id: "query", icon: Home, label: "首页", badge: null },
   { id: "analysis", icon: Sparkles, label: "AI智能分析", badge: "AI" },
   { id: "charts", icon: BarChart3, label: "数据可视化", badge: null },
   { id: "datasources", icon: Database, label: "数据源", badge: null },

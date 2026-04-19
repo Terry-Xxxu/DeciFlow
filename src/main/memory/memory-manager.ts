@@ -27,12 +27,24 @@ import {
 export class MemoryManager {
   private aiManager: AIChatManager | null = null
   private contextCache: Map<string, ConversationContext> = new Map()
+  private cleanupTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor() {
-    // 定期清理缓存
-    setInterval(() => {
+    this.scheduleCleanup()
+  }
+
+  private scheduleCleanup() {
+    this.cleanupTimer = setTimeout(() => {
       this.cleanupContextCache()
-    }, 60 * 60 * 1000)  // 每小时
+      this.scheduleCleanup()
+    }, 60 * 60 * 1000)  // 每小时，链式调度不会持续占用
+  }
+
+  destroy() {
+    if (this.cleanupTimer) {
+      clearTimeout(this.cleanupTimer)
+      this.cleanupTimer = null
+    }
   }
 
   /**

@@ -263,8 +263,9 @@ export class SchemaManager {
 
       case 'MongoDB': {
         const { MongoClient } = await import('mongodb')
-        const url = `mongodb://${username}:${password}@${host}:${port}`
-        const client = new MongoClient(url)
+        const client = new MongoClient(`mongodb://${host}:${port}`, {
+          auth: { username, password },
+        })
 
         try {
           await client.connect()
@@ -362,8 +363,9 @@ export class SchemaManager {
 
       case 'MongoDB': {
         const { MongoClient } = await import('mongodb')
-        const url = `mongodb://${username}:${password}@${host}:${port}`
-        const client = new MongoClient(url)
+        const client = new MongoClient(`mongodb://${host}:${port}`, {
+          auth: { username, password },
+        })
 
         try {
           await client.connect()
