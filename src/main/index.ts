@@ -58,7 +58,7 @@ function sanitizeError(error: unknown): string {
 function guardDbConfig(config: unknown): DatabaseConfig {
   if (!config || typeof config !== 'object') throw new Error('数据库配置无效')
   const c = config as any
-  const VALID_TYPES = ['postgresql', 'mysql', 'mongodb', 'clickhouse', 'redis', 'sqlite']
+  const VALID_TYPES = ['postgresql', 'mysql', 'mongodb', 'clickhouse', 'redis', 'sqlite', 'demo']
   if (!VALID_TYPES.includes(c.type)) throw new Error(`不支持的数据库类型: ${c.type}`)
   if (c.host && (typeof c.host !== 'string' || c.host.length > 255 || /[\n\r]/.test(c.host))) {
     throw new Error('主机地址格式无效')

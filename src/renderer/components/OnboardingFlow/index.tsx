@@ -794,10 +794,10 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete, onCl
 
                 <div className="space-y-3">
                   {[
-                    { name: 'users',    desc: '用户信息表，包含注册时间、渠道等', rows: '10,000+' },
-                    { name: 'orders',   desc: '订单数据，包含金额、状态等',       rows: '50,000+' },
-                    { name: 'products', desc: '产品目录，包含分类、价格等',       rows: '1,000+'  },
-                    { name: 'events',   desc: '用户行为事件，包含浏览、点击等',   rows: '100,000+'},
+                    { name: 'users',    desc: '用户信息表，包含注册时间、渠道等', rows: '500' },
+                    { name: 'orders',   desc: '订单数据，包含金额、状态等',       rows: '2,000' },
+                    { name: 'products', desc: '产品目录，包含分类、价格等',       rows: '20'  },
+                    { name: 'events',   desc: '用户行为事件，包含浏览、点击等',   rows: '5,000'},
                   ].map((table, i) => (
                     <div key={i} className="flex items-center gap-4 p-4 rounded-xl border bg-zinc-50 dark:bg-zinc-900/50 border-zinc-200 dark:border-zinc-800">
                       <div className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 bg-blue-100 dark:bg-zinc-800 border border-blue-200 dark:border-zinc-700">
