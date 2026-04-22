@@ -31,19 +31,38 @@ function AppContent() {
     }
   }, [])
 
-  const handleOnboardingComplete = async (csvFiles?: { name: string; path?: string }[]) => {
+  const handleOnboardingComplete = async (csvFiles?: { name: string; path?: string; content?: string }[]) => {
     if (csvFiles && csvFiles.length > 0) {
-      // 先批量添加数据源（无 schemaInfo）
-      const configs: DatabaseConfig[] = csvFiles.map((file, index) => ({
-        id: `file-${Date.now()}-${index}`,
-        name: file.name,
-        type: 'file' as any,
-        host: file.path || '',
-        port: 0,
-        database: file.name,
-        username: '',
-        connected: true,
-      }))
+      const api = (window as any).electronAPI
+      const configs: DatabaseConfig[] = []
+
+      for (let i = 0; i < csvFiles.length; i++) {
+        const file = csvFiles[i]
+        const dbId = `file-${Date.now()}-${i}`
+        const baseName = file.name.replace(/\.[^/.]+$/, '')
+
+        const config: DatabaseConfig = {
+          id: dbId,
+          name: baseName,
+          type: 'file' as any,
+          host: file.path || '',
+          port: 0,
+          database: file.name,
+          username: '',
+          connected: true,
+          filePath: file.path || '',
+          fileContent: file.content || '',
+        }
+        configs.push(config)
+
+        // 注册文件到 fileTableRegistry（有 content就走这个路径）
+        if (file.content) {
+          await api?.file?.register(dbId, '', file.name, file.content)
+        } else if (file.path) {
+          await api?.file?.register(dbId, file.path, file.name)
+        }
+      }
+
       addDatabase(configs)
 
       // 异步在后台分析每个文件的 schema

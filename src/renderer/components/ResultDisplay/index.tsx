@@ -3,6 +3,7 @@ import { AlertDialog } from '../Modal'
 import { AnalyzePanel } from '../AnalyzePanel'
 import { ChartDisplay, recommendChartType } from '../ChartDisplay'
 import { exportToCSV, exportToExcel, exportToPDF, exportAnalysisReport } from '../../utils/data-export'
+import { formatNumber, formatPercent } from '../../utils/format'
 
 interface AnalysisResult {
   conclusion: string
@@ -441,11 +442,11 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ result, databaseConfig })
               <div className="grid grid-cols-3 gap-4 text-sm">
                 <div>
                   <div className="text-slate-500">当前值</div>
-                  <div className="text-lg font-semibold text-slate-200">{analysis.keyChanges.current}</div>
+                  <div className="text-lg font-semibold text-slate-200">{formatNumber(analysis.keyChanges.current)}</div>
                 </div>
                 <div>
                   <div className="text-slate-500">上期值</div>
-                  <div className="text-lg font-semibold text-slate-200">{analysis.keyChanges.previous}</div>
+                  <div className="text-lg font-semibold text-slate-200">{formatNumber(analysis.keyChanges.previous)}</div>
                 </div>
                 <div>
                   <div className="text-slate-500">变化</div>
@@ -454,7 +455,7 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ result, databaseConfig })
                     analysis.keyChanges.changePercent < 0 ? 'text-red-400' :
                     'text-slate-400'
                   }`}>
-                    {analysis.keyChanges.changePercent > 0 ? '+' : ''}{analysis.keyChanges.changePercent.toFixed(2)}%
+                    {analysis.keyChanges.changePercent > 0 ? '+' : ''}{formatPercent(analysis.keyChanges.changePercent)}
                   </div>
                 </div>
               </div>
@@ -481,7 +482,7 @@ const ResultDisplay: React.FC<ResultDisplayProps> = ({ result, databaseConfig })
                         </div>
                       </div>
                       <div className="text-right">
-                        <div className="text-sm font-semibold text-slate-200">{driver.contribution.toFixed(1)}%</div>
+                        <div className="text-sm font-semibold text-slate-200">{formatPercent(driver.contribution)}</div>
                         <div className="text-xs text-slate-500">贡献度</div>
                       </div>
                     </div>

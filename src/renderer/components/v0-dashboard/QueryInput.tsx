@@ -1,7 +1,7 @@
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Button } from "../v0-ui/Button"
-import { Sparkles, Send, FileText, ChevronRight, Play, Loader2 } from "lucide-react"
+import { Sparkles, Send, FileText, ChevronRight, Play, Loader2, Code2 } from "lucide-react"
 import { cn } from "../../lib/utils"
 
 const suggestions = [
@@ -32,28 +32,39 @@ const templates = [
 
 interface QueryInputProps {
   onSubmit?: (query: string) => void
+  onSqlSubmit?: (sql: string) => void
   isLoading?: boolean
   // 外部注入预填充内容（如点击快捷分析时）
   pendingQuery?: string
   onPendingQueryConsumed?: () => void
 }
 
-export function QueryInput({ onSubmit, isLoading = false, pendingQuery, onPendingQueryConsumed }: QueryInputProps) {
+export function QueryInput({ onSubmit, onSqlSubmit, isLoading = false, pendingQuery, onPendingQueryConsumed }: QueryInputProps) {
   const [query, setQuery] = useState("")
   const [showTemplates, setShowTemplates] = useState(false)
+  const [sqlMode, setSqlMode] = useState(false)
+  const prevPendingRef = useRef<string | undefined>(undefined)
 
   // 当外部传入 pendingQuery 时，填入输入框
+  // pendingQuery 变空时也要重置 ref，确保下次能再次触发
   useEffect(() => {
     if (pendingQuery) {
       setQuery(pendingQuery)
-      onPendingQueryConsumed?.()
+      setSqlMode(false)
+      prevPendingRef.current = pendingQuery
+    } else {
+      prevPendingRef.current = undefined
     }
-  }, [pendingQuery, onPendingQueryConsumed])
+  }, [pendingQuery])
 
   const handleSubmit = () => {
-    if (query.trim() && onSubmit) {
-      onSubmit(query)
+    if (!query.trim()) return
+    if (sqlMode && onSqlSubmit) {
+      onSqlSubmit(query.trim())
+    } else if (onSubmit) {
+      onSubmit(query.trim())
       setQuery("") // Clear after submit
+      onPendingQueryConsumed?.() // 通知父组件清空 pendingQuery
     }
   }
 
@@ -65,6 +76,7 @@ export function QueryInput({ onSubmit, isLoading = false, pendingQuery, onPendin
 
   const handleTemplateSelect = (templateQuery: string) => {
     setQuery(templateQuery)
+    setSqlMode(false)
     setShowTemplates(false)
   }
 
@@ -77,49 +89,82 @@ export function QueryInput({ onSubmit, isLoading = false, pendingQuery, onPendin
             <Sparkles className="h-5 w-5 text-primary" />
           </div>
           <div className="flex-1">
-            <textarea
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault()
-                  handleSubmit()
-                }
-              }}
-              placeholder="用自然语言描述你想分析的数据..."
-              className="min-h-[60px] w-full resize-none bg-transparent text-foreground placeholder:text-muted-foreground outline-none focus:outline-none focus-visible:outline-none"
-              rows={2}
-            />
+            {sqlMode ? (
+              <textarea
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault()
+                    handleSubmit()
+                  }
+                }}
+                placeholder="SELECT * FROM table_name WHERE ..."
+                className="min-h-[60px] w-full resize-none bg-transparent text-foreground placeholder:text-muted-foreground outline-none focus:outline-none focus-visible:outline-none font-mono text-sm"
+                rows={2}
+              />
+            ) : (
+              <textarea
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault()
+                    handleSubmit()
+                  }
+                }}
+                placeholder="用自然语言描述你想分析的数据..."
+                className="min-h-[60px] w-full resize-none bg-transparent text-foreground placeholder:text-muted-foreground outline-none focus:outline-none focus-visible:outline-none"
+                rows={2}
+              />
+            )}
           </div>
         </div>
 
         <div className="flex items-center justify-between border-t border-border bg-muted/30 px-4 py-3">
           <div className="flex items-center gap-2 relative">
+            {/* SQL 模式切换 */}
             <Button
               variant="ghost"
               size="sm"
-              className="h-8 gap-2 text-muted-foreground"
-              onClick={() => setShowTemplates(!showTemplates)}
+              className={cn("h-8 gap-1.5", sqlMode ? "bg-primary/10 text-primary" : "text-muted-foreground")}
+              onClick={() => { setSqlMode(!sqlMode); setQuery("") }}
             >
-              <FileText className="h-4 w-4" />
-              <span>模板</span>
+              <Code2 className="h-4 w-4" />
+              <span className="text-xs">{sqlMode ? 'SQL' : '自然语言'}</span>
             </Button>
-            {showTemplates && (
-              <div className="absolute left-0 top-full z-10 mt-2 w-64 rounded-lg border border-border bg-card p-2 shadow-lg">
-                <p className="mb-2 px-2 text-xs font-medium text-muted-foreground">选择查询模板</p>
-                {templates.map((template) => (
-                  <button
-                    key={template.name}
-                    onClick={() => handleTemplateSelect(template.query)}
-                    className="w-full rounded-md px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  >
-                    <p className="font-medium">{template.name}</p>
-                    <p className="truncate text-xs opacity-70">{template.query}</p>
-                  </button>
-                ))}
-              </div>
+
+            {!sqlMode && (
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 gap-2 text-muted-foreground"
+                  onClick={() => setShowTemplates(!showTemplates)}
+                >
+                  <FileText className="h-4 w-4" />
+                  <span>模板</span>
+                </Button>
+                {showTemplates && (
+                  <div className="absolute left-0 top-full z-10 mt-2 w-64 rounded-lg border border-border bg-card p-2 shadow-lg">
+                    <p className="mb-2 px-2 text-xs font-medium text-muted-foreground">选择查询模板</p>
+                    {templates.map((template) => (
+                      <button
+                        key={template.name}
+                        onClick={() => handleTemplateSelect(template.query)}
+                        className="w-full rounded-md px-3 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      >
+                        <p className="font-medium">{template.name}</p>
+                        <p className="truncate text-xs opacity-70">{template.query}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
-            <span className="text-xs text-muted-foreground">按 Enter 发送</span>
+            <span className="text-xs text-muted-foreground">
+              {sqlMode ? '直接执行 SQL' : '按 Enter 发送'}
+            </span>
           </div>
           <Button
             onClick={handleSubmit}
@@ -133,8 +178,8 @@ export function QueryInput({ onSubmit, isLoading = false, pendingQuery, onPendin
               </>
             ) : (
               <>
-                <Send className="h-4 w-4" />
-                分析
+                {sqlMode ? <Play className="h-4 w-4" /> : <Send className="h-4 w-4" />}
+                {sqlMode ? '执行' : '分析'}
               </>
             )}
           </Button>

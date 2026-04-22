@@ -12,7 +12,7 @@ export type ChartType =
 /**
  * 聚合方式
  */
-export type AggregationType = "sum" | "avg" | "count" | "max" | "min"
+export type AggregationType = "sum" | "avg" | "count" | "count_distinct" | "max" | "min"
 
 /**
  * 图表配置

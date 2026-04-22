@@ -24,6 +24,7 @@ const VISIBLE_COUNT = 4
 interface QuickActionsProps {
   onNavigate?: (page: string) => void
   onQuerySelect?: (query: string) => void
+  onTemplateRun?: (templateId: string, templateName: string) => void
 }
 
 // 单个快捷分析按钮
@@ -242,7 +243,7 @@ function TemplateLibraryModal({
   )
 }
 
-export function QuickActions({ onNavigate, onQuerySelect }: QuickActionsProps) {
+export function QuickActions({ onNavigate, onQuerySelect, onTemplateRun }: QuickActionsProps) {
   const {
     pinnedIds,
     recommendedIds,
@@ -282,10 +283,11 @@ export function QuickActions({ onNavigate, onQuerySelect }: QuickActionsProps) {
 
   const handleTemplateClick = (template: AnalysisTemplate) => {
     setShowMore(false)
-    if (onQuerySelect) {
+    if (onTemplateRun) {
+      onTemplateRun(template.id, template.name)
+    } else if (onQuerySelect) {
       onQuerySelect(template.sampleQuestion)
     }
-    // 结果直接在 Dashboard 的查询框下方展示，不跳转到分析页
   }
 
   const hasUnconfirmed = unconfirmedSourceIds.length > 0

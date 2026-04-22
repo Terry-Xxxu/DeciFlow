@@ -470,28 +470,4 @@ describe('DeciFlow 多表关联分析测试', () => {
       expect(result.rows.length).toBeLessThan(10000)
     })
   })
-
-  // 辅助函数
-  private detectCircularReference(tableGraph: any, startTable: string, visited: Set<string>): boolean {
-    if (visited.has(startTable)) {
-      return true
-    }
-
-    visited.add(startTable)
-    const relatedTables = tableGraph[startTable] || []
-
-    for (const relatedTable of relatedTables) {
-      if (this.detectCircularReference(tableGraph, relatedTable, visited)) {
-        return true
-      }
-    }
-
-    visited.delete(startTable)
-    return false
-  }
-
-  private optimizeJoinOrder(tables: string[]): string[] {
-    // 简单的优化：从最小表开始，到最大表结束
-    return tables.sort((a, b) => a.length - b.length)
-  }
 })

@@ -13,6 +13,7 @@ interface DatabaseContextType {
   databases: DatabaseConfig[]
   addDatabase: (config: DatabaseConfig | DatabaseConfig[]) => void
   removeDatabase: (id: string) => void
+  removeDatabases: (ids: string[]) => void
   updateDatabase: (id: string, config: Partial<DatabaseConfig>) => void
   getDatabaseById: (id: string) => DatabaseConfig | undefined
 }
@@ -56,6 +57,9 @@ export interface DatabaseConfig {
   schemaConfirmed?: boolean
   // 连接方式：用于分类展示
   connectMethod?: ConnectionMethod
+  // 文件类型数据源（不序列化到 localStorage）
+  fileContent?: string
+  filePath?: string
 }
 
 const DatabaseContext = createContext<DatabaseContextType | undefined>(undefined)
@@ -127,9 +131,18 @@ export const DatabaseProvider: React.FC<{ children: ReactNode }> = ({ children }
   }
 
   // localStorage 只保存非敏感字段，密码单独存 electron-store
+  // fileContent 是 CSV 数据，需要保存以便页面刷新后仍然可用
   const saveDatabases = (dbs: DatabaseConfig[]) => {
     const sanitized = dbs.map(({ password: _pw, ...rest }) => rest)
-    localStorage.setItem(DATABASE_STORE_KEY, JSON.stringify(sanitized))
+    try {
+      localStorage.setItem(DATABASE_STORE_KEY, JSON.stringify(sanitized))
+    } catch (e: any) {
+      // localStorage 配额不足（通常是大文件 CSV），提示用户重新导入
+      if (e.name === 'QuotaExceededError' || e.message?.includes('quota')) {
+        console.warn('[DatabaseStore] localStorage quota exceeded, CSV data not persisted')
+        notificationManager.warning('存储空间不足', 'CSV 数据未能保存，刷新后需重新导入大文件')
+      }
+    }
   }
 
   const setDatabaseType = (type: DatabaseType) => {
@@ -163,6 +176,20 @@ export const DatabaseProvider: React.FC<{ children: ReactNode }> = ({ children }
     notificationManager.success('删除成功', '数据库配置已删除')
   }
 
+  /** 批量删除 — 一次性过滤，修复 React 闭包导致的只删一个 bug */
+  const removeDatabases = (ids: string[]) => {
+    const idSet = new Set(ids)
+    const newDatabases = databases.filter(db => !idSet.has(db.id))
+    const removed = databases.filter(db => idSet.has(db.id))
+    setDatabases(newDatabases)
+    saveDatabases(newDatabases)
+    removed.forEach(db => deleteCredential(db.id))
+    if (removed.some(db => db.type === currentDatabase)) {
+      setDatabaseType(DatabaseType.PostgreSQL)
+    }
+    notificationManager.success('删除成功', `${removed.length} 个数据源已删除`)
+  }
+
   const updateDatabase = (id: string, updates: Partial<DatabaseConfig>) => {
     // 如果更新包含密码，单独存 electron-store
     if (updates.password) saveCredential(id, updates.password)
@@ -186,6 +213,7 @@ export const DatabaseProvider: React.FC<{ children: ReactNode }> = ({ children }
         databases,
         addDatabase,
         removeDatabase,
+        removeDatabases,
         updateDatabase,
         getDatabaseById
       }}

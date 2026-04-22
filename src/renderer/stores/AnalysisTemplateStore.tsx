@@ -50,7 +50,7 @@ const STORAGE_KEY = 'deciflow_pinned_template_ids'
 
 const AnalysisTemplateContext = createContext<AnalysisTemplateContextType | undefined>(undefined)
 
-const DEFAULT_PINNED = ['user_retention', 'user_growth_trend', 'conversion_funnel', 'revenue_trend']
+const DEFAULT_PINNED: string[] = []
 
 export const AnalysisTemplateProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [templateLibrary, setTemplateLibrary] = useState<AnalysisTemplate[]>([])
@@ -123,16 +123,12 @@ export const AnalysisTemplateProvider: React.FC<{ children: ReactNode }> = ({ ch
     setUnconfirmedSourceIdsState(prev => prev.filter(id => id !== sourceId))
   }, [])
 
-  // 合并 pinned + recommended，去重，pinned 优先排在前面
+  // 只返回推荐模板（recommendedIds），无固定模板
   const getDisplayTemplates = useCallback((): AnalysisTemplate[] => {
-    const allIds = [...pinnedIds]
-    for (const id of recommendedIds) {
-      if (!allIds.includes(id)) allIds.push(id)
-    }
-    return allIds
+    return recommendedIds
       .map(id => templateLibrary.find(t => t.id === id))
       .filter(Boolean) as AnalysisTemplate[]
-  }, [pinnedIds, recommendedIds, templateLibrary])
+  }, [recommendedIds, templateLibrary])
 
   return (
     <AnalysisTemplateContext.Provider

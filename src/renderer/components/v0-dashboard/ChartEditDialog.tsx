@@ -48,6 +48,7 @@ const aggregationOptions = [
   { value: "sum" as AggregationType, label: "求和" },
   { value: "avg" as AggregationType, label: "平均值" },
   { value: "count" as AggregationType, label: "计数" },
+  { value: "count_distinct" as AggregationType, label: "去重计数" },
   { value: "max" as AggregationType, label: "最大值" },
   { value: "min" as AggregationType, label: "最小值" },
 ]
@@ -81,6 +82,10 @@ export function ChartEditDialog({ isOpen, onClose, onSave, editChart }: ChartEdi
   const [showGrid, setShowGrid] = useState(true)
   const [smoothLine, setSmoothLine] = useState(false)
   const [innerRadius, setInnerRadius] = useState(50)
+
+  // 可用字段（选择表后从数据库获取）
+  const [availableColumns, setAvailableColumns] = useState<{ name: string; type: string }[]>([])
+  const [loadingColumns, setLoadingColumns] = useState(false)
 
   // 初始化表单数据
   useEffect(() => {
@@ -116,12 +121,20 @@ export function ChartEditDialog({ isOpen, onClose, onSave, editChart }: ChartEdi
       setGroupBy("")
       setValueField("")
       setAggregation("sum")
+      setAvailableColumns([])
       setShowLegend(true)
       setShowGrid(true)
       setSmoothLine(false)
       setInnerRadius(50)
     }
   }, [editChart, isOpen, databases])
+
+  // 编辑模式下：数据库/表名确定后立即加载字段到下拉
+  useEffect(() => {
+    if (databaseId && tableName && isOpen) {
+      loadColumns(databaseId, tableName)
+    }
+  }, [databaseId, tableName, isOpen])
 
   // 按所选项目过滤数据库
   const projectDatabases = databases.filter(
@@ -144,60 +157,107 @@ export function ChartEditDialog({ isOpen, onClose, onSave, editChart }: ChartEdi
     const firstDb = databases.find(db => (db.projectId || "default") === projectId)
     setDatabaseId(firstDb?.id || "")
     setTableName("")
+    setAvailableColumns([])
+  }
+
+  // 加载表的列信息
+  const loadColumns = async (dbId: string, tblName: string) => {
+    setLoadingColumns(true)
+    try {
+      if (selectedDatabase?.type === 'file') {
+        const result = await (window as any).electronAPI.file.getTable(dbId, tblName)
+        if (result.success && result.data?.columns) {
+          setAvailableColumns(result.data.columns)
+          applyColumnDefaults(result.data.columns)
+        } else {
+          setAvailableColumns([])
+        }
+      } else {
+        // 数据库类型：查询 LIMIT 1 获取列信息
+        const db = getDatabaseById(dbId)
+        if (db) {
+          const qResult = await (window as any).electronAPI.database.query(db, `SELECT * FROM "${tblName}" LIMIT 1`)
+          if (qResult?.columns) {
+            const cols = qResult.columns.map((name: string) => ({ name, type: 'unknown' }))
+            setAvailableColumns(cols)
+            applyColumnDefaults(cols)
+          } else {
+            setAvailableColumns([])
+          }
+        }
+      }
+    } catch {
+      setAvailableColumns([])
+    } finally {
+      setLoadingColumns(false)
+    }
+  }
+
+  // 根据列信息自动填充 X 轴和数值字段
+  const applyColumnDefaults = (columns: { name: string; type?: string }[]) => {
+    // X 轴：优先日期/时间字段，其次字符串字段
+    if (!xAxis) {
+      const dateField = columns.find((c) =>
+        c.type?.toLowerCase().includes("date") ||
+        c.type?.toLowerCase().includes("time") ||
+        /^(date|day|week|month|year|period|created|updated|dt)$/i.test(c.name)
+      )
+      const strField = columns.find((c) =>
+        c.type?.toLowerCase().includes("char") ||
+        c.type?.toLowerCase().includes("text") ||
+        c.type?.toLowerCase().includes("varchar") ||
+        /^(name|title|label|category|type|status|region|city|channel|platform)$/i.test(c.name)
+      )
+      setXAxis((dateField || strField)?.name || columns[0]?.name || '')
+    }
+    // 数值字段：优先指标类字段，其次数值类型
+    if (!valueField) {
+      const metricField = columns.find((c) =>
+        /^(amount|revenue|count|total|sum|value|sales|gmv|cost|price|profit|rate|score|num)$/i.test(c.name) ||
+        /amount|count|total|revenue/i.test(c.name)
+      )
+      const numField = columns.find((c) =>
+        c.type?.toLowerCase().includes("int") ||
+        c.type?.toLowerCase().includes("decimal") ||
+        c.type?.toLowerCase().includes("float") ||
+        c.type?.toLowerCase().includes("double") ||
+        c.type?.toLowerCase().includes("numeric") ||
+        c.type?.toLowerCase().includes("number")
+      )
+      setValueField((metricField || numField)?.name || '')
+    }
+    // 分组字段：推荐分类型字段
+    if (!groupBy) {
+      const catField = columns.find((c) =>
+        /^(category|type|status|region|city|channel|platform|source|tag|level)$/i.test(c.name)
+      )
+      if (catField) setGroupBy(catField.name)
+    }
   }
 
   // 处理打开表浏览器
   const handleOpenTableBrowser = () => {
     if (!selectedDatabase?.connected) return
-    // 文件类型数据源不支持表浏览器，直接使用文件名作为表名
     if (selectedDatabase.type === 'file') {
+      // 从数据库配置中提取表名：先去扩展名，再处理特殊字符
       const fileName = selectedDatabase.database || selectedDatabase.name || ''
-      const tableName = fileName.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_]/g, '_')
-      setTableName(tableName || 'data')
+      const tblName = fileName.replace(/\.[^/.]+$/, '').replace(/[^a-zA-Z0-9_]/g, '_') || 'data'
+      console.log('[ChartEdit] file type, tblName:', tblName)
+      setTableName(tblName)
+      loadColumns(databaseId, tblName)
       return
     }
     setShowTableBrowser(true)
   }
 
-  // 处理表选择 — 自动推断字段（无需 AI）
+  // 处理表选择（来自 TableBrowser）
   const handleTableSelect = (selectedTableName: string, columns?: any[]) => {
     setTableName(selectedTableName)
-    if (!columns || columns.length === 0) return
-
-    // 优先级：日期/时间 > 字符串 作为 X 轴
-    const dateField = columns.find((c) =>
-      c.type?.toLowerCase().includes("date") ||
-      c.type?.toLowerCase().includes("time") ||
-      /^(date|day|week|month|year|period|created|updated|dt)$/i.test(c.name)
-    )
-    const strField = columns.find((c) =>
-      c.type?.toLowerCase().includes("char") ||
-      c.type?.toLowerCase().includes("text") ||
-      c.type?.toLowerCase().includes("varchar") ||
-      /^(name|title|label|category|type|status|region|city|channel|platform)$/i.test(c.name)
-    )
-    if (!xAxis) {
-      setXAxis((dateField || strField)?.name || columns[0]?.name || '')
-    }
-
-    // 优先级：金额/收入/指标 > 通用数值 作为数值字段
-    const metricField = columns.find((c) =>
-      /^(amount|revenue|count|total|sum|value|sales|gmv|cost|price|profit|rate|score|num)$/i.test(c.name) ||
-      c.name?.toLowerCase().includes('amount') ||
-      c.name?.toLowerCase().includes('count') ||
-      c.name?.toLowerCase().includes('total') ||
-      c.name?.toLowerCase().includes('revenue')
-    )
-    const numField = columns.find((c) =>
-      c.type?.toLowerCase().includes("int") ||
-      c.type?.toLowerCase().includes("decimal") ||
-      c.type?.toLowerCase().includes("float") ||
-      c.type?.toLowerCase().includes("double") ||
-      c.type?.toLowerCase().includes("numeric") ||
-      c.type?.toLowerCase().includes("number")
-    )
-    if (!valueField) {
-      setValueField((metricField || numField)?.name || '')
+    if (columns && columns.length > 0) {
+      setAvailableColumns(columns)
+      applyColumnDefaults(columns)
+    } else {
+      loadColumns(databaseId, selectedTableName)
     }
   }
 
@@ -355,7 +415,7 @@ export function ChartEditDialog({ isOpen, onClose, onSave, editChart }: ChartEdi
                 <Select
                   options={databaseOptions}
                   value={databaseId}
-                  onChange={(val) => { setDatabaseId(val); setTableName("") }}
+                  onChange={(val) => { setDatabaseId(val); setTableName(""); setAvailableColumns([]) }}
                   placeholder="选择数据库"
                 />
               )}
@@ -419,42 +479,78 @@ export function ChartEditDialog({ isOpen, onClose, onSave, editChart }: ChartEdi
         {/* 坐标轴配置 */}
         <div className={sectionClass}>
           <h3 className={headingClass}>数据字段</h3>
-          <div className="space-y-3">
-            <Input
-              label={<span className={labelClass}>X轴字段 <span className="text-destructive">*</span></span>}
-              placeholder="例如：date, category, name"
-              value={xAxis}
-              onChange={(e) => setXAxis(e.target.value)}
-            />
-            <Input
-              label={<span className={labelClass}>Y轴字段（可选）</span>}
-              placeholder="用于双轴图表"
-              value={yAxis}
-              onChange={(e) => setYAxis(e.target.value)}
-            />
-            <Input
-              label={<span className={labelClass}>分组字段（可选）</span>}
-              placeholder="用于热力图等复杂图表"
-              value={groupBy}
-              onChange={(e) => setGroupBy(e.target.value)}
-            />
-            <div className="grid grid-cols-2 gap-3">
-              <Input
-                label={<span className={labelClass}>数值字段 <span className="text-destructive">*</span></span>}
-                placeholder="例如：amount, count"
-                value={valueField}
-                onChange={(e) => setValueField(e.target.value)}
-              />
-              <div>
-                <label className={cn("text-sm mb-1.5 block", labelClass)}>聚合方式</label>
+          <div className="grid grid-cols-3 gap-3">
+            {/* X轴 */}
+            <div>
+              <label className={cn("text-sm mb-1.5 block", labelClass)}>
+                X轴 <span className="text-destructive">*</span>
+              </label>
+              {availableColumns.length > 0 ? (
                 <Select
-                  options={aggregationOptions}
-                  value={aggregation}
-                  onChange={setAggregation}
-                  placeholder="选择聚合方式"
+                  options={availableColumns.map(c => ({ value: c.name, label: c.name }))}
+                  value={xAxis}
+                  onChange={setXAxis}
+                  placeholder="选择 X 轴字段"
                 />
-              </div>
+              ) : (
+                <Input
+                  placeholder={tableName ? "加载中..." : "请先选择数据表"}
+                  value={xAxis}
+                  onChange={(e) => setXAxis(e.target.value)}
+                  disabled={!tableName || loadingColumns}
+                />
+              )}
             </div>
+            {/* Y轴指标 */}
+            <div>
+              <label className={cn("text-sm mb-1.5 block", labelClass)}>
+                Y轴指标 <span className="text-destructive">*</span>
+              </label>
+              {availableColumns.length > 0 ? (
+                <Select
+                  options={availableColumns.map(c => ({ value: c.name, label: c.name }))}
+                  value={valueField}
+                  onChange={setValueField}
+                  placeholder="选择指标字段"
+                />
+              ) : (
+                <Input
+                  placeholder={tableName ? "加载中..." : "请先选择数据表"}
+                  value={valueField}
+                  onChange={(e) => setValueField(e.target.value)}
+                  disabled={!tableName || loadingColumns}
+                />
+              )}
+            </div>
+            {/* 分组字段 */}
+            <div>
+              <label className={cn("text-sm mb-1.5 block", labelClass)}>分组字段</label>
+              {availableColumns.length > 0 ? (
+                <Select
+                  options={[{ value: "", label: "无" }, ...availableColumns.map(c => ({ value: c.name, label: c.name }))]}
+                  value={groupBy}
+                  onChange={setGroupBy}
+                  placeholder="按维度分组"
+                />
+              ) : (
+                <Input
+                  placeholder="按维度分组"
+                  value={groupBy}
+                  onChange={(e) => setGroupBy(e.target.value)}
+                  disabled={!tableName || loadingColumns}
+                />
+              )}
+            </div>
+          </div>
+          {/* 聚合方式 */}
+          <div className="mt-3">
+            <label className={cn("text-sm mb-1.5 block", labelClass)}>聚合方式</label>
+            <Select
+              options={aggregationOptions}
+              value={aggregation}
+              onChange={setAggregation}
+              placeholder="选择聚合方式"
+            />
           </div>
         </div>
 

@@ -1,5 +1,5 @@
 
-import { useState, useRef } from "react"
+import { useState, useRef, useEffect } from "react"
 import { PageLayout } from "../components/v0-layout/PageLayout"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/v0-ui/Card"
 import { Button } from "../components/v0-ui/Button"
@@ -29,7 +29,10 @@ import {
   Eye,
   BarChart3,
   Table,
-  ExternalLink,
+  Settings,
+  GripVertical,
+  CheckSquare,
+  Square,
 } from "lucide-react"
 import { cn } from "../lib/utils"
 import { useDatabase } from "../stores/DatabaseStore"
@@ -150,9 +153,10 @@ interface MultiFileUploadState {
 }
 
 export function V0DataSourcesPage({ onNavigate }: V0Props) {
-  const { databases, addDatabase, removeDatabase, updateDatabase } = useDatabase()
+  const { databases, addDatabase, removeDatabase, removeDatabases, updateDatabase } = useDatabase()
   const { projects, addProject, removeProject, updateProject } = useProjects()
   const [showAddModal, setShowAddModal] = useState(false)
+  const [showBatchModal, setShowBatchModal] = useState(false)
   const [selectedScenario, setSelectedScenario] = useState<ConnectionScenario>("standard")
   const [newSource, setNewSource] = useState<NewDatabaseForm>({
     name: "",
@@ -203,7 +207,7 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
     return 'standard'
   }
 
-  // 展开 demo 数据库的表格
+  // 展开数据库的表格
   const handleExpandTables = async (db: DatabaseConfig) => {
     if (expandedTables[db.id]) {
       // 已经展开过，折叠
@@ -214,9 +218,15 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
       })
       return
     }
-    // demo 数据库直接用已知表名，无需调用 API
+    // demo 数据库直接用已知表名
     if (db.type === 'demo') {
       setExpandedTables(prev => ({ ...prev, [db.id]: ['users', 'orders', 'products', 'events'] }))
+      return
+    }
+    // file 类型：单个文件对应单个表，表名即文件名（去掉扩展名）
+    if (db.type === 'file') {
+      const tableName = (db.database || 'data').replace(/\.[^/.]+$/, '')
+      setExpandedTables(prev => ({ ...prev, [db.id]: [tableName] }))
       return
     }
     // 其他数据库调用主进程获取表列表
@@ -234,9 +244,9 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
     setPreviewTableData(null)
     setPreviewTableLoading(true)
     try {
-      const result = await (window as any).electronAPI.database.query(db, `SELECT * FROM "${tableName}" LIMIT 100`)
+      const result = await (window as any).electronAPI.database.query(db, `SELECT * FROM "${tableName}" LIMIT 50`)
       if (!result.success) {
-        throw new Error(result.error || '查询失败')
+        throw new Error(result.message || result.error || '查询失败')
       }
       const rows = result.data?.rows || []
       const cols = result.data?.columns || []
@@ -251,23 +261,50 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
   }
 
   // 添加数据源
-  const handleAdd = () => {
+  const handleAdd = async () => {
     if (selectedScenario === "file") {
       if (fileUpload.files.length === 0 || !fileUpload.name) {
         showToast("请选择文件并输入名称", "error")
         return
       }
-      // 检查第一个文件的大小（后续文件已在选择时验证）
-      if (fileUpload.files[0].size > MAX_FILE_SIZE) {
-        showToast(`文件大小超过限制（最大 ${MAX_FILE_SIZE / 1024 / 1024}MB）`, "error")
-        return
+      // 读取文件内容（优先用路径，拖拽失败则用 FileReader）
+      const readFile = async (file: any, dbId: string): Promise<{ success: boolean; error?: string; content?: string }> => {
+        const filePath = file.path || ''
+        // 路径有效：走路径读取
+        if (filePath && filePath !== file.name) {
+          const result = await (window as any).electronAPI.file.register(dbId, filePath, file.name)
+          return result
+        }
+        // 路径无效（拖拽场景）：用 FileReader 读取内容
+        return new Promise(resolve => {
+          const reader = new FileReader()
+          reader.onload = async () => {
+            try {
+              const content = reader.result as string
+              const result = await (window as any).electronAPI.file.register(dbId, '', file.name, content)
+              resolve(result)
+            } catch (err) {
+              resolve({ success: false, error: '文件读取失败' })
+            }
+          }
+          reader.onerror = () => resolve({ success: false, error: '文件读取失败' })
+          reader.readAsText(file)
+        })
       }
-      // 如果只有一个文件，保持原有逻辑
+
+      // 如果只有一个文件
       if (fileUpload.files.length === 1) {
-        const file = fileUpload.files[0]
+        const file = fileUpload.files[0] as any
+        const baseName = file.name.replace(/\.[^/.]+$/, '')
+        const dbId = `file-${Date.now()}`
+        const result = await readFile(file, dbId)
+        if (!result.success) {
+          showToast(`文件读取失败：${result.error}`, "error")
+          return
+        }
         const config = {
-          id: `file-${Date.now()}`,
-          name: fileUpload.name,
+          id: dbId,
+          name: baseName,
           type: "file" as DatabaseType,
           host: `file://${file.name}`,
           port: 0,
@@ -276,15 +313,29 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
           connected: true,
           projectId: newSource.projectId || "default",
           connectMethod: "file" as any,
+          filePath: file.path || '',
+          fileContent: result.content || '',
         }
         addDatabase(config)
         showToast("文件数据源已添加", "success")
       } else {
-        // 多个文件：批量添加
-        fileUpload.files.forEach((file, index) => {
-          const config = {
-            id: `file-${Date.now()}-${index}`,
-            name: fileUpload.name + (fileUpload.files.length > 1 ? ` (${index + 1})` : ""),
+        // 多个文件：批量添加，每个文件独立命名
+        const timestamp = Date.now()
+        const configs: any[] = []
+        let failedCount = 0
+        for (let i = 0; i < fileUpload.files.length; i++) {
+          const file = fileUpload.files[i] as any
+          const baseName = (file.name || 'file').replace(/\.[^/.]+$/, '')
+          const dbId = `file-${timestamp}-${i}`
+          const result = await readFile(file, dbId)
+          if (!result.success) {
+            showToast(`文件 "${file.name}" 读取失败：${result.error}`, "error")
+            failedCount++
+            continue
+          }
+          configs.push({
+            id: dbId,
+            name: baseName,
             type: "file" as DatabaseType,
             host: `file://${file.name}`,
             port: 0,
@@ -293,10 +344,18 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
             connected: true,
             projectId: newSource.projectId || "default",
             connectMethod: "file" as any,
-          }
-          addDatabase(config)
-        })
-        showToast(`已添加 ${fileUpload.files.length} 个文件数据源`, "success")
+            filePath: file.path || '',
+            fileContent: result.content || '',
+          })
+        }
+        if (configs.length > 0) {
+          addDatabase(configs)
+        }
+        if (failedCount > 0) {
+          showToast(`${failedCount} 个文件导入失败`, "error")
+        } else if (configs.length > 0) {
+          showToast(`已添加 ${configs.length} 个文件数据源`, "success")
+        }
       }
       setShowAddModal(false)
       resetForm()
@@ -456,7 +515,19 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
 
   // 连接/断开数据库
   const handleToggleConnection = async (db: DatabaseConfig) => {
-    if (db.type === 'file') return // 文件数据源始终连接
+    if (db.type === 'file') {
+      // 文件类型：点击即断开（清理注册表）
+      if (db.connected) {
+        try {
+          await window.electronAPI.database.disconnect(db)
+        } catch { /* ignore */ }
+        updateDatabase(db.id, { connected: false })
+        showToast("已断开连接", "info")
+      } else {
+        updateDatabase(db.id, { connected: true })
+      }
+      return
+    }
 
     if (db.connected) {
       try {
@@ -592,10 +663,16 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
             管理和连接您的数据源
           </p>
         </div>
-        <Button onClick={() => setShowAddModal(true)} className="gap-2">
-          <Plus className="h-4 w-4" />
-          添加数据源
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button onClick={() => setShowBatchModal(true)} variant="outline" className="gap-2">
+            <Settings className="h-4 w-4" />
+            批量管理
+          </Button>
+          <Button onClick={() => setShowAddModal(true)} className="gap-2">
+            <Plus className="h-4 w-4" />
+            添加数据源
+          </Button>
+        </div>
       </div>
 
       {/* 按项目分组展示数据源 */}
@@ -735,7 +812,7 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
                                       onRefreshSchema={() => handleRefreshSchema(dataSource)}
                                       onEdit={() => setEditingSource(dataSource)}
                                       onDelete={() => handleDelete(dataSource)}
-                                      onExpandTables={dataSource.type === 'demo' || (dataSource as any).connectMethod === 'demo'
+                                      onExpandTables={dataSource.type === 'demo' || dataSource.type === 'file' || (dataSource as any).connectMethod === 'demo' || (dataSource as any).connectMethod === 'file'
                                         ? () => handleExpandTables(dataSource)
                                         : undefined}
                                       expandedTables={expandedTables[dataSource.id]}
@@ -791,6 +868,20 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
         />
       )}
 
+      {/* Batch Management Modal */}
+      {showBatchModal && (
+        <BatchManagementModal
+          projects={projects}
+          databases={databases}
+          onClose={() => setShowBatchModal(false)}
+          onUpdateProject={updateProject}
+          onRemoveProject={removeProject}
+          onAddProject={addProject}
+          onUpdateDatabase={(id, updates) => updateDatabase(id, updates)}
+          onRemoveDatabases={removeDatabases}
+        />
+      )}
+
       {/* Edit Dialog */}
       {editingSource && (
         <EditDialog
@@ -827,7 +918,7 @@ export function V0DataSourcesPage({ onNavigate }: V0Props) {
                 {previewTableData && (
                   <CardDescription>
                     显示前 {previewTableData.rows.length} 行
-                    {previewTableData.total > 100 && `，共 ${previewTableData.total} 行`}
+                    {previewTableData.total > 50 && `，共 ${previewTableData.total} 行`}
                   </CardDescription>
                 )}
               </div>
@@ -925,14 +1016,16 @@ function DataSourceCard({
   }
 
   const isExpanded = !!expandedTables
+  // file 类型：表名即文件名（去掉扩展名）
+  const fileTableName = isFile ? (db.database || 'data').replace(/\.[^/.]+$/, '') : ''
 
   return (
     <Card className={cn("overflow-hidden", isConnected && "border-primary/30")}>
       <CardContent className="p-5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3 min-w-0 flex-1">
-            {/* 展开/折叠按钮（仅 demo 数据库） */}
-            {isDemo && onExpandTables ? (
+            {/* 展开/折叠按钮（file 类型不需要，其他类型都需要） */}
+            {!isFile && onExpandTables ? (
               <button
                 onClick={onExpandTables}
                 className={cn(
@@ -987,6 +1080,18 @@ function DataSourceCard({
           </div>
 
           <div className="flex items-center gap-0.5 flex-shrink-0 ml-2">
+            {/* 概览按钮（file 类型随时可用，无需连接） */}
+            {isFile && onPreviewTable && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 gap-1.5 text-primary hover:text-primary"
+                onClick={() => onPreviewTable(db, fileTableName)}
+              >
+                <Eye className="h-4 w-4" />
+                概览
+              </Button>
+            )}
             {/* 刷新 Schema */}
             {isConnected && !isFile && !isDemo && (
               <Button
@@ -1009,8 +1114,8 @@ function DataSourceCard({
                 isConnected ? "text-muted-foreground hover:text-destructive" : "text-primary hover:text-primary"
               )}
               onClick={onToggleConnection}
-              disabled={testing || isFile}
-              title={isFile ? "文件数据源始终连接" : isConnected ? "断开连接" : "连接"}
+              disabled={testing}
+              title={isConnected ? "断开连接" : "连接"}
             >
               {testing ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -1041,8 +1146,8 @@ function DataSourceCard({
           </div>
         </div>
 
-        {/* 展开的表格列表（demo 数据库） */}
-        {isExpanded && expandedTables && (
+        {/* 展开的表格列表（仅 demo 数据库，file 类型不需要折叠结构） */}
+        {isExpanded && expandedTables && !isFile && (
           <div className="mt-4 pl-10 space-y-1">
             <p className="text-xs font-medium text-muted-foreground mb-2">数据表</p>
             {expandedTables.length === 0 ? (
@@ -1060,7 +1165,7 @@ function DataSourceCard({
                   {isConnected && onPreviewTable && (
                     <button
                       onClick={() => onPreviewTable(db, tableName)}
-                      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors opacity-0 group-hover:opacity-100"
+                      className="flex items-center gap-1 text-xs text-primary hover:opacity-80 transition-opacity"
                     >
                       <Eye className="h-3 w-3" />
                       概览
@@ -1973,6 +2078,452 @@ function DeleteConfirmDialog({ db, onConfirm, onCancel }: DeleteConfirmDialogPro
           </Button>
         </CardContent>
       </Card>
+    </div>
+  )
+}
+
+// ─── 批量管理弹窗 ───────────────────────────────────────────────────────────────
+
+interface BatchManagementModalProps {
+  projects: Array<{ id: string; name: string; order: number }>
+  databases: DatabaseConfig[]
+  onClose: () => void
+  onUpdateProject: (id: string, updates: { name?: string; order?: number }) => void
+  onRemoveProject: (id: string) => void
+  onAddProject: (name: string) => { id: string; name: string; order: number }
+  onUpdateDatabase: (id: string, updates: Partial<DatabaseConfig>) => void
+  onRemoveDatabases: (ids: string[]) => void
+}
+
+function BatchManagementModal({
+  projects,
+  databases,
+  onClose,
+  onUpdateProject,
+  onRemoveProject,
+  onAddProject,
+  onUpdateDatabase,
+  onRemoveDatabases,
+}: BatchManagementModalProps) {
+  // 项目折叠状态
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set(['default']))
+  // 项目重命名
+  const [renamingProjectId, setRenamingProjectId] = useState<string | null>(null)
+  const [renameProjectValue, setRenameProjectValue] = useState('')
+  // 数据源重命名
+  const [renamingDbId, setRenamingDbId] = useState<string | null>(null)
+  const [renameDbValue, setRenameDbValue] = useState('')
+  // 批量选择
+  const [selectedDbIds, setSelectedDbIds] = useState<Set<string>>(new Set())
+  // 新建项目输入
+  const [newProjectName, setNewProjectName] = useState('')
+  // 项目拖拽排序
+  const [projectOrder, setProjectOrder] = useState<string[]>([])
+  // 确认弹窗
+  const [deleteProjectConfirm, setDeleteProjectConfirm] = useState<string | null>(null)
+  const [deleteDbConfirm, setDeleteDbConfirm] = useState(false)
+  // 删除中的项目 id（用于二次确认）
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null)
+
+  useEffect(() => {
+    setProjectOrder(projects.map(p => p.id))
+  }, [])
+
+  // 切换项目展开/折叠
+  const toggleProject = (projectId: string) => {
+    setExpandedProjects(prev => {
+      const next = new Set(prev)
+      if (next.has(projectId)) next.delete(projectId)
+      else next.add(projectId)
+      return next
+    })
+  }
+
+  // 拖拽排序
+  const handleDragStart = (e: React.DragEvent, id: string) => {
+    e.dataTransfer.setData('text/plain', id)
+  }
+
+  const handleDrop = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault()
+    const draggedId = e.dataTransfer.getData('text/plain')
+    if (!draggedId || draggedId === targetId) return
+    const newOrder = [...projectOrder]
+    const draggedIdx = newOrder.indexOf(draggedId)
+    const targetIdx = newOrder.indexOf(targetId)
+    if (draggedIdx === -1 || targetIdx === -1) return
+    newOrder.splice(draggedIdx, 1)
+    newOrder.splice(targetIdx, 0, draggedId)
+    setProjectOrder(newOrder)
+    newOrder.forEach((id, index) => onUpdateProject(id, { order: index }))
+  }
+
+  // 项目重命名
+  const confirmRenameProject = () => {
+    if (renamingProjectId && renameProjectValue.trim()) {
+      onUpdateProject(renamingProjectId, { name: renameProjectValue.trim() })
+    }
+    setRenamingProjectId(null)
+    setRenameProjectValue('')
+  }
+
+  // 数据源重命名
+  const confirmRenameDb = () => {
+    if (renamingDbId && renameDbValue.trim()) {
+      onUpdateDatabase(renamingDbId, { name: renameDbValue.trim() })
+    }
+    setRenamingDbId(null)
+    setRenameDbValue('')
+  }
+
+  // 新建项目
+  const handleAddProject = () => {
+    if (!newProjectName.trim()) return
+    const created = onAddProject(newProjectName.trim())
+    setProjectOrder(prev => [...prev, created.id])
+    setNewProjectName('')
+  }
+
+  // 删除项目（带确认）
+  const handleDeleteProjectClick = (id: string) => {
+    const count = databases.filter(d => (d as any).projectId === id || (!(d as any).projectId && id === 'default')).length
+    setDeletingProjectId(id)
+    setDeleteProjectConfirm(count > 0 ? `删除后该项目下的 ${count} 个数据源将移至「默认项目」，数据不会被删除。` : null)
+  }
+
+  const confirmDeleteProject = () => {
+    if (!deletingProjectId) return
+    onRemoveProject(deletingProjectId)
+    setProjectOrder(prev => prev.filter(pid => pid !== deletingProjectId))
+    setDeletingProjectId(null)
+    setDeleteProjectConfirm(null)
+  }
+
+  // 表格选择
+  const toggleDbSelection = (id: string) => {
+    setSelectedDbIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const selectAllInProject = (projectId: string) => {
+    const projectDbs = databases.filter(d => (d as any).projectId === projectId || (!(d as any).projectId && projectId === 'default'))
+    const allSelected = projectDbs.every(d => selectedDbIds.has(d.id))
+    setSelectedDbIds(prev => {
+      const next = new Set(prev)
+      projectDbs.forEach(d => {
+        if (allSelected) next.delete(d.id)
+        else next.add(d.id)
+      })
+      return next
+    })
+  }
+
+  // 批量删除（一次性过滤，修复 React 闭包导致的只删一个 bug）
+  const confirmBatchDelete = () => {
+    const toDelete = [...selectedDbIds]
+    setSelectedDbIds(new Set())
+    setDeleteDbConfirm(false)
+    onRemoveDatabases(toDelete)
+  }
+
+  // 按项目分组（按排序顺序）
+  const sortedProjects = projects.slice().sort((a, b) => {
+    const ai = projectOrder.indexOf(a.id)
+    const bi = projectOrder.indexOf(b.id)
+    return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi)
+  })
+
+  const getProjectDbs = (projectId: string) =>
+    databases.filter(d => (d as any).projectId === projectId || (!(d as any).projectId && projectId === 'default'))
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <Card className="w-full max-w-2xl max-h-[85vh] flex flex-col shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <CardHeader className="flex flex-row items-center justify-between pb-3">
+          <div>
+            <CardTitle>批量管理</CardTitle>
+            <CardDescription>点击项目名称展开，批量管理数据源</CardDescription>
+          </div>
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground">
+            <X className="h-4 w-4" />
+          </button>
+        </CardHeader>
+
+        <CardContent className="flex-1 overflow-y-auto custom-scrollbar pt-0 space-y-1">
+          {/* 全局批量删除栏 */}
+          {selectedDbIds.size > 0 && (
+            <div className="sticky top-0 z-10 flex items-center justify-between rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-2.5 mb-2 shadow-sm">
+              <span className="text-sm text-destructive font-medium">
+                已选择 {selectedDbIds.size} 个数据源
+              </span>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => setDeleteDbConfirm(true)}
+                className="gap-1.5"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                批量删除
+              </Button>
+            </div>
+          )}
+
+          {/* 项目树形列表 */}
+          {sortedProjects.map(project => {
+            const isDefault = project.id === 'default'
+            const isExpanded = expandedProjects.has(project.id)
+            const projectDbs = getProjectDbs(project.id)
+            const isRenamingProject = renamingProjectId === project.id
+            const projectAllSelected = projectDbs.length > 0 && projectDbs.every(d => selectedDbIds.has(d.id))
+
+            return (
+              <div key={project.id} className="rounded-xl border border-border overflow-hidden">
+                {/* 项目行 */}
+                <div
+                  className="flex items-center gap-2 py-3 px-3 hover:bg-muted/40 transition-colors group"
+                  draggable={!isDefault}
+                  onDragStart={(e) => !isDefault && handleDragStart(e, project.id)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => !isDefault && handleDrop(e, project.id)}
+                >
+                  {/* 拖拽手柄 */}
+                  {!isDefault ? (
+                    <GripVertical className="h-4 w-4 text-muted-foreground/30 cursor-grab flex-shrink-0" />
+                  ) : (
+                    <div className="w-4 flex-shrink-0" />
+                  )}
+
+                  {/* 展开/折叠箭头 */}
+                  <button
+                    onClick={() => projectDbs.length > 0 && toggleProject(project.id)}
+                    className={cn(
+                      "flex-shrink-0 w-5 h-5 rounded flex items-center justify-center transition-colors",
+                      projectDbs.length > 0 ? "hover:bg-muted text-muted-foreground" : "text-transparent cursor-default"
+                    )}
+                  >
+                    <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", isExpanded && "rotate-90")} />
+                  </button>
+
+                  <FolderOpen className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+
+                  {/* 项目名称 */}
+                  {isRenamingProject ? (
+                    <input
+                      autoFocus
+                      value={renameProjectValue}
+                      onChange={e => setRenameProjectValue(e.target.value)}
+                      onBlur={confirmRenameProject}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') confirmRenameProject()
+                        if (e.key === 'Escape') { setRenamingProjectId(null); setRenameProjectValue('') }
+                      }}
+                      className="flex-1 bg-transparent border-b border-primary outline-none text-sm font-semibold text-foreground"
+                    />
+                  ) : (
+                    <button
+                      className="flex-1 text-left text-sm font-semibold text-foreground hover:text-primary transition-colors"
+                      onClick={() => projectDbs.length > 0 && toggleProject(project.id)}
+                    >
+                      {project.name}
+                      {isDefault && (
+                        <Badge variant="outline" className="ml-2 text-[10px] px-1.5 py-0.5">默认</Badge>
+                      )}
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">({projectDbs.length})</span>
+                    </button>
+                  )}
+
+                  {/* 项目操作按钮 */}
+                  {!isDefault && (
+                    <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        onClick={() => { setRenamingProjectId(project.id); setRenameProjectValue(project.name) }}
+                        className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                        title="重命名"
+                      >
+                        <Edit className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteProjectClick(project.id)}
+                        className="p-1.5 rounded-md hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                        title="删除"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* 展开的数据源列表 */}
+                {isExpanded && (
+                  <div className="border-t border-border bg-muted/20">
+                    {/* 项目内全选 */}
+                    {projectDbs.length > 0 && (
+                      <div className="flex items-center gap-2 px-3 py-2 pl-14 border-b border-border/50">
+                        <button
+                          onClick={() => selectAllInProject(project.id)}
+                          className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          {projectAllSelected
+                            ? <><CheckSquare className="h-3.5 w-3.5 text-primary" /> 取消全选</>
+                            : <><Square className="h-3.5 w-3.5" /> 全选</>
+                          }
+                        </button>
+                      </div>
+                    )}
+
+                    {/* 数据源行 */}
+                    {projectDbs.length === 0 ? (
+                      <p className="text-xs text-muted-foreground py-3 pl-14">暂无数据源</p>
+                    ) : projectDbs.map(db => {
+                      const isRenamingDb = renamingDbId === db.id
+                      const isSelected = selectedDbIds.has(db.id)
+                      return (
+                        <div
+                          key={db.id}
+                          className={cn(
+                            "group flex items-center gap-2 py-2.5 px-3 pl-14 transition-colors border-b border-border/30 last:border-0",
+                            isSelected ? "bg-primary/5" : "hover:bg-muted/50"
+                          )}
+                        >
+                          {/* 选择框 */}
+                          <button
+                            onClick={() => db.id && toggleDbSelection(db.id)}
+                            className="flex-shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                          >
+                            {isSelected
+                              ? <CheckSquare className="h-4 w-4 text-primary" />
+                              : <Square className="h-4 w-4" />
+                            }
+                          </button>
+
+                          {/* 数据源图标 */}
+                          {db.type === 'file'
+                            ? <File className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                            : <Database className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
+                          }
+
+                          {/* 名称 */}
+                          {isRenamingDb ? (
+                            <input
+                              autoFocus
+                              value={renameDbValue}
+                              onChange={e => setRenameDbValue(e.target.value)}
+                              onBlur={confirmRenameDb}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') confirmRenameDb()
+                                if (e.key === 'Escape') { setRenamingDbId(null); setRenameDbValue('') }
+                              }}
+                              className="flex-1 bg-transparent border-b border-primary outline-none text-sm text-foreground min-w-0"
+                            />
+                          ) : (
+                            <button
+                              className="flex-1 text-left text-sm text-foreground truncate hover:text-primary transition-colors"
+                              onClick={() => { setRenamingDbId(db.id); setRenameDbValue(db.name || '') }}
+                              title="点击重命名"
+                            >
+                              {db.name}
+                            </button>
+                          )}
+
+                          {/* 文件名/描述 */}
+                          <span className="text-xs text-muted-foreground truncate max-w-[100px] flex-shrink-0" title={db.database}>
+                            {db.database || db.host}
+                          </span>
+
+                          {/* 操作 */}
+                          <button
+                            onClick={() => { setRenamingDbId(db.id); setRenameDbValue(db.name || '') }}
+                            className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors opacity-0 group-hover:opacity-100 flex-shrink-0"
+                            title="重命名"
+                          >
+                            <Edit className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={() => { db.id && toggleDbSelection(db.id) }}
+                            className={cn(
+                              "p-1 rounded transition-colors flex-shrink-0",
+                              isSelected
+                                ? "text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100"
+                                : "text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100"
+                            )}
+                            title={isSelected ? "取消选择" : "选择"}
+                          >
+                            {isSelected ? <CheckSquare className="h-3.5 w-3.5" /> : <Square className="h-3.5 w-3.5" />}
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+
+          {/* 新建项目 */}
+          <div className="flex items-center gap-2 pt-2 border-t border-border mt-2">
+            <Input
+              placeholder="新建项目名称"
+              value={newProjectName}
+              onChange={e => setNewProjectName(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleAddProject() }}
+              className="flex-1 h-9 text-sm"
+            />
+            <Button size="sm" onClick={handleAddProject} disabled={!newProjectName.trim()}>
+              <Plus className="h-3.5 w-3.5 mr-1" />
+              新建项目
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* 删除项目确认 */}
+      {deletingProjectId && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) { setDeletingProjectId(null); setDeleteProjectConfirm(null) } }}>
+          <Card className="w-full max-w-sm shadow-2xl" onClick={e => e.stopPropagation()}>
+            <CardHeader>
+              <CardTitle className="text-base">确认删除项目</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                {deleteProjectConfirm || '确定要删除此项目吗？'}
+              </p>
+              <div className="flex justify-end gap-2 mt-4">
+                <Button variant="outline" size="sm" onClick={() => { setDeletingProjectId(null); setDeleteProjectConfirm(null) }}>取消</Button>
+                <Button variant="destructive" size="sm" onClick={confirmDeleteProject}>确认删除</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* 批量删除确认 */}
+      {deleteDbConfirm && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setDeleteDbConfirm(false) }}>
+          <Card className="w-full max-w-sm shadow-2xl" onClick={e => e.stopPropagation()}>
+            <CardHeader>
+              <CardTitle className="text-base">确认批量删除</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                确定要删除选中的 {selectedDbIds.size} 个数据源吗？此操作无法撤销。
+              </p>
+              <div className="flex justify-end gap-2 mt-4">
+                <Button variant="outline" size="sm" onClick={() => setDeleteDbConfirm(false)}>取消</Button>
+                <Button variant="destructive" size="sm" onClick={confirmBatchDelete}>确认删除</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </div>
   )
 }

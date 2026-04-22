@@ -114,9 +114,10 @@ export class HybridNL2SQLService {
     naturalLanguage: string,
     tableInfo?: { tableName: string; fields: string[] }
   ): HybridQueryResult {
-    // 设置表信息（如果有）
+    // 设置表上下文：表名 + 推断类型 + 实际列名
     if (tableInfo) {
-      this.ruleParser.setTableInfo(tableInfo.tableName, tableInfo.fields)
+      const tableType = this.ruleParser.inferTableTypeFromName(tableInfo.tableName)
+      this.ruleParser.setTableContext(tableInfo.tableName, tableType, tableInfo.fields)
     }
 
     // 尝试规则匹配
@@ -128,7 +129,7 @@ export class HybridNL2SQLService {
         explanation: `基于规则匹配：${result.matchedPattern || '常规查询'}`,
         confidence: result.confidence,
         usingAI: false,
-        suggestions: this.ruleParser.getSupportedQueries()
+        suggestions: this.ruleParser.getExamples()
       }
     }
 
@@ -142,7 +143,7 @@ export class HybridNL2SQLService {
       suggestions: [
         '尝试使用更具体的描述',
         '参考以下支持的查询格式：',
-        ...this.ruleParser.getSupportedQueries()
+        ...this.ruleParser.getExamples()
       ]
     }
   }
@@ -463,7 +464,7 @@ ${dictionaryDesc}
 
     // 添加常用查询模式
     if (!this.hasAI()) {
-      suggestions.push(...this.ruleParser.getSupportedQueries())
+      suggestions.push(...this.ruleParser.getExamples())
     }
 
     return suggestions

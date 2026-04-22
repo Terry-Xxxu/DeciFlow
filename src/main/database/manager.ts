@@ -11,6 +11,7 @@ import { createClient, RedisClientType } from 'redis'
 import { createClient as createClickHouseClient } from '@clickhouse/client'
 import { DatabaseConfig, DatabaseType } from '../../shared/types'
 import { sqlSecurityValidator } from '../security/sql-validator'
+import { fileTableRegistry } from './file-registry'
 import * as fs from 'fs'
 import * as path from 'path'
 import * as http from 'http'
@@ -852,15 +853,23 @@ export class DatabaseManager {
       case DatabaseType.ClickHouse: return new ClickHouseConnection(config)
       default:
         if ((config.type as string) === 'demo') return new DemoConnection(config)
+        if ((config.type as string) === 'file') return new DemoConnection(config) // placeholder
         throw new Error(`不支持的数据库类型: ${config.type}`)
     }
   }
 
-  /** Demo 数据库懒加载：首次访问时自动建连接并缓存 */
+  /** Demo/File 数据库懒加载：首次访问时自动建连接并缓存 */
   private async ensureDemoConnection(config: DatabaseConfig): Promise<void> {
-    if ((config.type as string) !== 'demo') return
+    const t = config.type as string
+    if (t !== 'demo' && t !== 'file') return
     const connectionId = this.getConnectionId(config)
     if (!this.connections.has(connectionId)) {
+      // File 类型：加载文件到注册表
+      if (t === 'file') {
+        const filePath = config.filePath || config.host?.replace('file://', '') || ''
+        const fileName = config.database || 'file'
+        if (config.id) fileTableRegistry.loadFile(config.id, filePath, fileName)
+      }
       const conn = new DemoConnection(config)
       await conn.connect()
       this.connections.set(connectionId, conn)
@@ -871,6 +880,29 @@ export class DatabaseManager {
    * 执行查询
    */
   async query(config: DatabaseConfig, sql: string): Promise<QueryResult> {
+    if ((config.type as string) === 'file') {
+      if (!config.id) throw new Error('文件数据源缺少 ID')
+      // 懒加载：首次访问时自动将文件加载到注册表
+      let existing = fileTableRegistry.getTablesForDb(config.id)
+      if (existing.length === 0) {
+        const filePath = config.filePath || config.host?.replace('file://', '') || ''
+        const fileName = config.database || 'file'
+        if (filePath) {
+          fileTableRegistry.loadFile(config.id, filePath, fileName)
+          existing = fileTableRegistry.getTablesForDb(config.id)
+        }
+      }
+      if (existing.length === 0) {
+        throw new Error(`文件 "${config.database}" 尚未加载，请重新导入该文件`)
+      }
+      const result = fileTableRegistry.query(config.id, sql)
+      return {
+        columns: result.columns,
+        rows: result.rows,
+        rowCount: result.rowCount,
+        executionTime: 0,
+      }
+    }
     await this.ensureDemoConnection(config)
     const connection = this.getConnection(config)
     return await connection.query(sql)
@@ -880,6 +912,17 @@ export class DatabaseManager {
    * 获取数据库表列表
    */
   async getTables(config: DatabaseConfig): Promise<string[]> {
+    if ((config.type as string) === 'file') {
+      // 懒加载：首次访问时自动将文件加载到注册表
+      const existing = fileTableRegistry.getTablesForDb(config.id || '')
+      if (existing.length === 0) {
+        const filePath = config.filePath || config.host?.replace('file://', '') || ''
+        const fileName = config.database || 'file'
+        if (config.id) fileTableRegistry.loadFile(config.id, filePath, fileName)
+      }
+      const tables = fileTableRegistry.getTablesForDb(config.id || '')
+      return tables.map(t => t.tableName)
+    }
     await this.ensureDemoConnection(config)
     const connection = this.getConnection(config)
     return await connection.getTables()

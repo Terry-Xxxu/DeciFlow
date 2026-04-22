@@ -10,6 +10,8 @@ interface QueryInputProps {
   placeholder: string
   examples?: Array<{ text: string; icon: string }>
   compact?: boolean
+  pendingQuery?: string
+  onPendingQueryConsumed?: () => void
 }
 
 export const QueryInput = forwardRef<HTMLInputElement, QueryInputProps>(({
@@ -18,7 +20,9 @@ export const QueryInput = forwardRef<HTMLInputElement, QueryInputProps>(({
   onSubmit,
   placeholder,
   examples = [],
-  compact = false
+  compact = false,
+  pendingQuery,
+  onPendingQueryConsumed,
 }, ref) => {
   const { currentDatabase } = useDatabase()
   const [isFocused, setIsFocused] = useState(false)
@@ -29,6 +33,15 @@ export const QueryInput = forwardRef<HTMLInputElement, QueryInputProps>(({
       (ref as any).current = inputRef.current
     }
   }, [ref])
+
+  // pendingQuery 到达时：填入输入框并自动执行
+  useEffect(() => {
+    if (pendingQuery) {
+      onChange(pendingQuery)
+      onPendingQueryConsumed?.()
+      setTimeout(() => onSubmit(), 100)
+    }
+  }, [pendingQuery])
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {

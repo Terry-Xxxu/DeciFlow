@@ -5,6 +5,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react'
 import { useTheme } from '../../contexts/ThemeContext'
+import { formatNumber } from '../../utils/format'
 import {
   LineChart,
   Line,
@@ -141,6 +142,7 @@ const LineChartComponent: React.FC<{ data: ChartData[]; color?: string; isDark: 
           color: isDark ? '#F1F5F9' : '#1e293b',
           boxShadow: isDark ? 'none' : '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
         }}
+        formatter={(value: number) => [formatNumber(value), '数值']}
       />
       <Legend
         wrapperStyle={{ color: isDark ? '#94A3B8' : '#475569' }}
@@ -186,6 +188,7 @@ const BarChartComponent: React.FC<{ data: ChartData[]; color?: string; isDark: b
           color: isDark ? '#F1F5F9' : '#1e293b',
           boxShadow: isDark ? 'none' : '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
         }}
+        formatter={(value: number) => [formatNumber(value), '数值']}
       />
       <Legend
         wrapperStyle={{ color: isDark ? '#94A3B8' : '#475569' }}
@@ -227,6 +230,7 @@ const PieChartComponent: React.FC<{ data: ChartData[]; isDark: boolean }> = ({ d
           color: isDark ? '#F1F5F9' : '#1e293b',
           boxShadow: isDark ? 'none' : '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
         }}
+        formatter={(value: number) => [formatNumber(value), '数值']}
       />
       <Legend
         wrapperStyle={{ color: isDark ? '#94A3B8' : '#475569' }}
@@ -261,6 +265,7 @@ const AreaChartComponent: React.FC<{ data: ChartData[]; color?: string; isDark: 
           color: isDark ? '#F1F5F9' : '#1e293b',
           boxShadow: isDark ? 'none' : '0 4px 6px -1px rgba(0, 0, 0, 0.1)'
         }}
+        formatter={(value: number) => [formatNumber(value), '数值']}
       />
       <Legend
         wrapperStyle={{ color: isDark ? '#94A3B8' : '#475569' }}
@@ -378,13 +383,13 @@ export const ChartDisplay: React.FC<ChartDisplayProps> = ({
         </div>
         <div className="text-center">
           <div className="text-2xl font-bold text-green-400">
-            {Math.max(...chartData.map(d => d.value)).toLocaleString()}
+            {formatNumber(Math.max(...chartData.map(d => d.value)))}
           </div>
           <div className={`text-xs ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>最大值</div>
         </div>
         <div className="text-center">
           <div className="text-2xl font-bold text-blue-400">
-            {chartData.reduce((sum, d) => sum + d.value, 0).toLocaleString()}
+            {formatNumber(chartData.reduce((sum, d) => sum + d.value, 0))}
           </div>
           <div className={`text-xs ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>总计</div>
         </div>

@@ -1,7 +1,7 @@
 
 import { useState } from "react"
 import { Button } from "../v0-ui/Button"
-import { Table, Download, Eye, EyeOff, Code2, Check } from "lucide-react"
+import { Table, Download, Eye, EyeOff, Copy, Check } from "lucide-react"
 import { cn } from "../../lib/utils"
 import { downloadAsCSV, downloadAsJSON, copyToClipboard, showToast } from "../../lib/download"
 
@@ -17,12 +17,13 @@ interface DataPreviewProps {
   result: QueryResult
 }
 
-const PAGE_SIZE = 50
+const PAGE_SIZE = 20
 
 export function DataPreview({ result }: DataPreviewProps) {
   const [showSQL, setShowSQL] = useState(false)
   const [copied, setCopied] = useState(false)
   const [page, setPage] = useState(0)
+  const [jumpInput, setJumpInput] = useState('')
 
   const { columns, rows, rowCount, duration, sql } = result
   const totalPages = Math.ceil(rows.length / PAGE_SIZE)
@@ -71,23 +72,23 @@ export function DataPreview({ result }: DataPreviewProps) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="sm" className="gap-2" onClick={handleCopySQL}>
+          <Button variant="ghost" size="sm" className="gap-2 text-muted-foreground" onClick={handleCopySQL} title="复制 SQL">
             {copied ? (
               <>
-                <Check className="h-4 w-4" />
-                已复制
+                <Check className="h-4 w-4 text-green-500" />
+                <span className="text-green-500">已复制</span>
               </>
             ) : (
               <>
-                <Code2 className="h-4 w-4" />
-                SQL
+                <Copy className="h-4 w-4" />
+                复制 SQL
               </>
             )}
           </Button>
           <Button
             variant="ghost"
             size="sm"
-            className="gap-2"
+            className="gap-2 text-muted-foreground"
             onClick={() => setShowSQL(!showSQL)}
           >
             {showSQL ? (
@@ -166,19 +167,63 @@ export function DataPreview({ result }: DataPreviewProps) {
           <Button
             variant="ghost"
             size="sm"
+            className="text-muted-foreground"
+            disabled={page === 0}
+            onClick={() => setPage(0)}
+          >
+            首页
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground"
             disabled={page === 0}
             onClick={() => setPage((p) => p - 1)}
           >
             上一页
           </Button>
+          <span className="text-sm text-muted-foreground min-w-[80px] text-center">
+            {page + 1} / {totalPages || 1}
+          </span>
           <Button
             variant="ghost"
             size="sm"
+            className="text-muted-foreground"
             disabled={page >= totalPages - 1}
             onClick={() => setPage((p) => p + 1)}
           >
             下一页
           </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground"
+            disabled={page >= totalPages - 1}
+            onClick={() => setPage(totalPages - 1)}
+          >
+            末页
+          </Button>
+          <div className="flex items-center gap-1 ml-2 border border-border rounded-md px-2 py-1">
+            <span className="text-xs text-muted-foreground">跳至</span>
+            <input
+              type="number"
+              min={1}
+              max={totalPages || 1}
+              className="w-12 text-xs bg-transparent text-foreground text-center outline-none"
+              value={jumpInput}
+              onChange={(e) => setJumpInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const p = parseInt(jumpInput, 10)
+                  if (!isNaN(p) && p >= 1 && p <= totalPages) {
+                    setPage(p - 1)
+                    setJumpInput('')
+                  }
+                }
+              }}
+            />
+            <span className="text-xs text-muted-foreground">页</span>
+          </div>
         </div>
       </div>
     </div>

@@ -5,6 +5,7 @@ import path from 'path'
 import { isDev } from './utils/env'
 import { AIChatManager } from './ai/adapter'
 import { databaseManager } from './database/manager'
+import { fileTableRegistry, parseCSVContent } from './database/file-registry'
 import { NaturalLanguageQueryService } from './ai/nl2sql'
 import { InsightsEngine } from './ai/insights'
 import { metricLayer } from './metrics/layer'
@@ -23,6 +24,7 @@ import { auditLoggerV2 } from './security/audit-log-v2'
 import { analyzeEngine } from './ai/analyze-engine'
 import { initFunnelService } from './funnel-handlers'
 import { analyzeTableSchema } from './analysis/table-schema-analyzer'
+import { generateTemplateSQL, autoSelectAnalysis, getSupportedTemplateIds } from './analysis/template-sql-generator'
 import { ANALYSIS_TEMPLATES, CATEGORY_LABELS } from './analysis/template-library'
 import { chatHistoryStore } from './storage/chat-history-store'
 import { memoryManager } from './memory/memory-manager'
@@ -322,6 +324,10 @@ ipcMain.handle('db:connect', async (_, config: DatabaseConfig) => {
 ipcMain.handle('db:disconnect', async (_, config: DatabaseConfig) => {
   try {
     await databaseManager.removeConnection(config)
+    // File 类型：同时清理注册表
+    if ((config.type as string) === 'file' && config.id) {
+      fileTableRegistry.removeDb(config.id)
+    }
     return { success: true }
   } catch (error) {
     return {
@@ -539,12 +545,32 @@ ipcMain.handle('nl:generate-sql', async (_, databaseType: any, query: string, co
       // 把真实 schema 注入到 context，让 AI 看到实际表结构
       const enrichedContext = { ...context }
       if (context?.databaseConfig) {
-        // 如果用户指定了关注的表，只传这些表的 schema（减少 token 消耗）
-        const filteredDesc = selectedTables.length > 0
-          ? schemaManager.generateSchemaDescriptionForTables(context.databaseConfig, selectedTables)
-          : schemaManager.generateSchemaDescription(context.databaseConfig)
-        if (filteredDesc && filteredDesc !== '暂无 Schema 信息') {
-          enrichedContext.schemaDescription = filteredDesc
+        const dbType = context.databaseConfig.type as string
+        // 文件类型从 fileTableRegistry 获取 CSV 列信息
+        if (dbType === 'file' && context.databaseConfig.id) {
+          const tables = fileTableRegistry.getTablesForDb(context.databaseConfig.id)
+          if (tables.length > 0) {
+            const table = tables[0]
+            const schemaDesc = `表: ${table.tableName}\n列: ${table.columns.map(c => `${c.name} (${c.inferredType})`).join(', ')}`
+            enrichedContext.schemaDescription = schemaDesc
+            enrichedContext.tableName = table.tableName
+          }
+        // Demo 内置数据库：硬编码表结构
+        } else if (dbType === 'demo') {
+          const demoSchema = `内置示例电商数据库，包含以下表：
+users(id(int), name(text), email(text), channel(text), city(text), status(text), created_at(date))
+orders(id(int), user_id(int), amount(float), status(text), product_category(text), created_at(date))
+products(id(int), name(text), category(text), price(float), stock(int))
+events(id(int), user_id(int), event_type(text), page(text), created_at(datetime))`
+          enrichedContext.schemaDescription = demoSchema
+        // 真实数据库从 schemaManager 获取
+        } else {
+          const filteredDesc = selectedTables.length > 0
+            ? schemaManager.generateSchemaDescriptionForTables(context.databaseConfig, selectedTables)
+            : schemaManager.generateSchemaDescription(context.databaseConfig)
+          if (filteredDesc && filteredDesc !== '暂无 Schema 信息') {
+            enrichedContext.schemaDescription = filteredDesc
+          }
         }
       }
       const result = await nl2sqlService.generateSQL(databaseType, query, enrichedContext)
@@ -583,15 +609,36 @@ ipcMain.handle('nl:generate-sql', async (_, databaseType: any, query: string, co
     let tableInfo: { tableName: string; fields: string[] } | undefined
     const targetTable = selectedTables[0] || context?.tableName || ''
     if (targetTable && context?.databaseConfig) {
-      try {
-        const tableSchema = schemaManager.getTableSchema(context.databaseConfig, targetTable)
-        if (tableSchema) {
+      const dbType = context.databaseConfig.type as string
+      // 文件类型从 fileTableRegistry 获取 CSV 列信息
+      if (dbType === 'file' && context.databaseConfig.id) {
+        const tables = fileTableRegistry.getTablesForDb(context.databaseConfig.id)
+        if (tables.length > 0) {
           tableInfo = {
-            tableName: targetTable,
-            fields: tableSchema.columns.map((c: any) => c.columnName),
+            tableName: tables[0].tableName,
+            fields: tables[0].columns.map(c => c.name),
           }
         }
-      } catch { /* schema 未缓存，跳过 */ }
+      // Demo 内置数据库：硬编码字段
+      } else if (dbType === 'demo') {
+        const demoFields: Record<string, string[]> = {
+          users: ['id','name','email','channel','city','status','created_at'],
+          orders: ['id','user_id','amount','status','product_category','created_at'],
+          products: ['id','name','category','price','stock'],
+          events: ['id','user_id','event_type','page','created_at'],
+        }
+        tableInfo = { tableName: targetTable, fields: demoFields[targetTable] || [] }
+      } else {
+        try {
+          const tableSchema = schemaManager.getTableSchema(context.databaseConfig, targetTable)
+          if (tableSchema) {
+            tableInfo = {
+              tableName: targetTable,
+              fields: tableSchema.columns.map((c: any) => c.columnName),
+            }
+          }
+        } catch { /* schema 未缓存，跳过 */ }
+      }
     }
 
     const result = await hybridNL2SQLService.parseQuery(query, databaseType, tableInfo)
@@ -2197,6 +2244,63 @@ ipcMain.handle('file:read', async (_, filePath: string) => {
   }
 })
 
+// 获取文件表的列信息
+ipcMain.handle('file:get-table', async (_, dbId: string, tableName: string) => {
+  try {
+    const table = fileTableRegistry.getTable(dbId, tableName)
+    if (!table) {
+      return { success: false, error: `表 "${tableName}" 不存在` }
+    }
+    return {
+      success: true,
+      data: {
+        tableName: table.tableName,
+        columns: table.columns,
+      },
+    }
+  } catch (error) {
+    return { success: false, error: sanitizeError(error) }
+  }
+})
+
+// 注册文件到 FileTableRegistry（读取内容并加载到内存）
+ipcMain.handle('file:register', async (_, dbId: string, filePath: string, fileName: string, content?: string) => {
+  try {
+    guardString(fileName, 200, '文件名')
+
+    // 有 content 表示拖拽过来的文件（无路径），直接用内容加载
+    if (content !== undefined) {
+      if (content.length > 100 * 1024 * 1024) {
+        return { success: false, error: '文件超过 100MB 限制' }
+      }
+      fileTableRegistry.loadFileContent(dbId, content, fileName)
+      return { success: true, content }
+    }
+
+    // 无 content，走路径读取
+    guardString(filePath, 1000, '文件路径')
+    const resolved = path.resolve(filePath)
+    const allowedRoots = [app.getPath('home'), app.getPath('downloads'), app.getPath('documents'), app.getPath('temp')]
+    const isAllowed = allowedRoots.some(root => resolved.startsWith(root))
+    if (!isAllowed) {
+      return { success: false, error: '无权限访问该路径，请将文件放在桌面、下载或文档文件夹中' }
+    }
+    const stats = fs.statSync(resolved)
+    if (stats.size > 100 * 1024 * 1024) {
+      return { success: false, error: '文件超过 100MB 限制' }
+    }
+    fileTableRegistry.loadFile(dbId, filePath, fileName)
+    // 读取文件内容返回给前端，以便存储到 localStorage
+    const fileContent = fs.readFileSync(resolved, 'utf-8')
+    return { success: true, content: fileContent }
+  } catch (error) {
+    return {
+      success: false,
+      error: `文件读取失败：${sanitizeError(error)}`,
+    }
+  }
+})
+
 // ========== 表格 Schema 智能分析 ==========
 
 // 分析单个 CSV 文件的 schema，返回表格类型 + 匹配的分析模板
@@ -2207,7 +2311,7 @@ ipcMain.handle('table:analyze-schema', async (_, filePath: string, fileName: str
       try {
         content = fs.readFileSync(filePath, 'utf-8')
       } catch {
-        // 如果路径无法读取（如拖拽时无 path），返回低置信度结果
+        // 路径无法读取（如拖拽时无 path），返回低置信度结果
       }
     }
     const result = await analyzeTableSchema(fileName, content, aiChatManager)
@@ -2252,5 +2356,770 @@ ipcMain.handle('table:batch-analyze', async (_, tables: Array<{ filePath: string
       success: false,
       error: error instanceof Error ? error.message : '批量分析失败',
     }
+  }
+})
+
+// ── 分析引擎：自动分析 + 模板执行 ──────────────────────────────────────────────
+
+/**
+ * 识别表类型（采样推断）
+ */
+ipcMain.handle('analysis:recognize-table', async (_, db: DatabaseConfig, tableName: string) => {
+  try {
+    // 从 fileTableRegistry 获取已加载的表结构（含懒加载）
+    if ((db.type as string) === 'file' && db.id) {
+      let tables = fileTableRegistry.getTablesForDb(db.id)
+      // 去掉扩展名，与 loadFile/loadFileContent 保持一致
+      const dbName = (db as any).database || tableName
+      const tableNameKey = dbName.replace(/\.[^/.]+$/, '') || tableName
+      if (tables.length === 0 && (db as any).filePath) {
+        try { fileTableRegistry.loadFile(db.id, (db as any).filePath, dbName); tables = fileTableRegistry.getTablesForDb(db.id) } catch { /* ignore */ }
+      }
+      if (tables.length === 0 && (db as any).fileContent) {
+        try { fileTableRegistry.loadFileContent(db.id, (db as any).fileContent, dbName); tables = fileTableRegistry.getTablesForDb(db.id) } catch { /* ignore */ }
+      }
+      const table = tables.find(t => t.tableName === tableNameKey)
+      if (table) {
+        const colNames = table.columns.map(c => c.name)
+        const tableType = inferTableType(colNames, tableName)
+        const suggestedTemplateIds = getSuggestedTemplates(colNames, tableType, table.columns, 'file', tableName)
+        const analysis = await analyzeTableSchema(tableName, '', aiChatManager).catch(() => ({
+          tableType: tableType.label,
+          confidence: 0.5,
+          suggestedTemplateIds,
+          needsConfirmation: false,
+          analysisSource: 'heuristic' as const,
+        }))
+        return {
+          success: true,
+          data: {
+            ...analysis,
+            tableType: analysis.tableType || tableType.label,
+            suggestedTemplateIds,
+            columns: table.columns,
+          },
+        }
+      }
+    }
+    // 真实数据库：查前 20 行推断类型
+    let rows: any[] = []
+    let colNames: string[] = []
+    try {
+      const sampleResult = await databaseManager.query(db, `SELECT * FROM "${tableName}" LIMIT 20`)
+      rows = sampleResult.rows || []
+      colNames = sampleResult.columns || []
+    } catch {
+      return { success: false, error: '无法获取表结构' }
+    }
+    const columns = colNames.map((name: string) => ({
+      name,
+      sampleValues: rows.slice(0, 5).map((r: any) => String(r[name] ?? '')).filter(Boolean),
+      inferredType: 'string' as const,
+    }))
+    const analysis = await analyzeTableSchema(tableName, '', aiChatManager)
+    return { success: true, data: { ...analysis, columns } }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : '表类型识别失败' }
+  }
+})
+
+/**
+ * 获取表的前 N 行数据（用于预览弹窗）
+ */
+ipcMain.handle('analysis:getTableData', async (_, db: DatabaseConfig, tableName: string, limit = 50) => {
+  try {
+    if ((db.type as string) === 'file' && db.id) {
+      let tables = fileTableRegistry.getTablesForDb(db.id)
+      if (tables.length === 0 && (db as any).filePath) {
+        try { fileTableRegistry.loadFile(db.id, (db as any).filePath, db.database || tableName); tables = fileTableRegistry.getTablesForDb(db.id) } catch { /* ignore */ }
+      }
+      if (tables.length === 0 && (db as any).fileContent) {
+        try { fileTableRegistry.loadFileContent(db.id, (db as any).fileContent, db.database || tableName); tables = fileTableRegistry.getTablesForDb(db.id) } catch { /* ignore */ }
+      }
+      const table = tables.find(t => t.tableName === tableName)
+      if (!table) return { success: false, error: `表 ${tableName} 未找到` }
+      const rows = table.rows.slice(0, limit)
+      const columns = table.columns.map(c => c.name)
+      return { success: true, data: { columns, rows, total: table.rows.length } }
+    }
+    // 真实数据库
+    const result = await databaseManager.query(db, `SELECT * FROM "${tableName}" LIMIT ${limit}`)
+    return { success: true, data: { columns: result.columns || [], rows: result.rows || [], total: result.rowCount || 0 } }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : '获取表数据失败' }
+  }
+})
+
+// ─────────────────────────────────────────────────────────────────
+// 表类型推断引擎（两层：表名匹配 → 列信息重新判断）
+// 原则：表名是最强信号，列信息用于确认或覆盖
+// ─────────────────────────────────────────────────────────────────
+
+// 表名关键词 → 表类型映射
+const TABLE_NAME_PATTERNS: Array<{
+  keywords: string[]
+  type: string
+  label: string
+  // 列字段精化：表名匹配后，验证列是否支持该判断
+  // 返回 false 则用列字段重新判断（覆盖表名结果）
+  confirm?: (cols: string[], has: Record<string, boolean>) => boolean
+}> = [
+  // ── 记账交易表（金额 + 时间 + 分类/支付，无商品/产品字段）────────
+  {
+    keywords: ['transaction', 'transactions', 'txn', 'txns', 'payment', 'payments', 'pay', 'bill', 'invoice', 'charge', 'ledger', 'entry', '流水'],
+    type: 'transaction', label: '记账交易表',
+    // 表名已明确是交易类，不需要列字段二次确认
+  },
+  // ── 电商/订单表（金额 + 商品/产品字段）──────────────────────────
+  {
+    keywords: ['order', 'orders', 'trade', 'purchase', 'cart', 'checkout'],
+    type: 'ecommerce', label: '电商/订单表',
+    confirm: (cols, has) => has.hasAmount && (has.hasProduct || has.hasCategory),
+  },
+  // ── 财务/收入表（金额 + 财务相关关键词）────────────────────────
+  {
+    keywords: ['revenue', 'income', 'profit', 'sales', 'gmv', 'earnings', 'billing', 'settlement'],
+    type: 'revenue', label: '财务/收入表',
+    confirm: (cols, has) => has.hasAmount,
+  },
+  // ── 用户行为事件表 ────────────────────────────────────────────
+  {
+    keywords: ['event', 'log', 'action', 'activity', 'audit', 'click', 'visit', 'access'],
+    type: 'conversion', label: '用户行为表',
+    confirm: (cols, has) => has.hasUser || has.hasEvent,
+  },
+  // ── 用户分析表 ────────────────────────────────────────────────
+  {
+    keywords: ['user', 'users', 'customer', 'customers', 'member', 'members', 'account', 'accounts', 'signup', 'register', 'cohort'],
+    type: 'retention', label: '用户分析表',
+    confirm: (cols, has) => has.hasTime || has.hasUser,
+  },
+  // ── SaaS 指标表 ──────────────────────────────────────────────
+  {
+    keywords: ['mrr', 'arr', 'subscription', 'trial', 'churn', 'recurring'],
+    type: 'saas', label: 'SaaS 指标表',
+    confirm: (cols, has) => has.hasAmount || cols.some(c => /amount|revenue|mrr|plan/.test(c)),
+  },
+  // ── 营销分析表 ───────────────────────────────────────────────
+  {
+    keywords: ['campaign', 'ads', 'ad', 'marketing', 'channel', 'seo', 'conversion', 'attribution'],
+    type: 'marketing', label: '营销分析表',
+    confirm: (cols, has) => has.hasAmount || has.hasChannel,
+  },
+  // ── 产品分析表 ───────────────────────────────────────────────
+  {
+    keywords: ['ab_test', 'abtest', 'experiment', 'variant', 'nps', 'feedback', 'survey'],
+    type: 'product', label: '产品分析表',
+    confirm: (cols, has) => cols.some(c => /test|variant|experiment|nps|feedback|ab/.test(c)),
+  },
+  // ── 内容流量表 ───────────────────────────────────────────────
+  {
+    keywords: ['page', 'view', 'views', 'traffic', 'bounce', 'article', 'post', 'content', 'read'],
+    type: 'content', label: '内容流量表',
+    confirm: (cols, has) => cols.some(c => /page|view|traffic|bounce|content|article|click/.test(c)),
+  },
+  // ── 人员管理表 ───────────────────────────────────────────────
+  {
+    keywords: ['employee', 'staff', 'hire', 'recruit', 'headcount', 'attrition', 'salary', 'payroll', 'team'],
+    type: 'hr', label: '人员管理表',
+    confirm: (cols, has) => cols.some(c => /employee|hire|salary|department|headcount|attrition/.test(c)),
+  },
+  // ── 库存/商品表 ───────────────────────────────────────────────
+  {
+    keywords: ['product', 'products', 'sku', 'inventory', 'stock', 'goods', 'item', 'items', 'catalog'],
+    type: 'inventory', label: '商品/库存表',
+    confirm: (cols, has) => cols.some(c => /product|sku|stock|price|category|inventory/.test(c)),
+  },
+  // ── 工单/客服表 ─────────────────────────────────────────────
+  {
+    keywords: ['ticket', 'tickets', 'support', 'issue', 'complaint', 'case', 'service'],
+    type: 'support', label: '工单/客服表',
+    confirm: (cols, has) => cols.some(c => /ticket|support|issue|status|priority|category/.test(c)),
+  },
+  // ── 通知/消息表 ─────────────────────────────────────────────
+  {
+    keywords: ['notification', 'notifications', 'message', 'messages', 'email_log', 'sms_log', 'push_log', 'mail_log', 'alert'],
+    type: 'notification', label: '通知/消息表',
+    confirm: (cols, has) => cols.some(c => /notification|message|email|sms|push|status|type|channel/.test(c)),
+  },
+  // ── 评价/评分表 ─────────────────────────────────────────────
+  {
+    keywords: ['review', 'reviews', 'rating', 'ratings', 'comment', 'comments', 'feedback', 'rating_log'],
+    type: 'review', label: '评价/评分表',
+    confirm: (cols, has) => cols.some(c => /rating|review|comment|score|star|feedback|user|product/.test(c)),
+  },
+  // ── 会话/登录日志表 ──────────────────────────────────────────
+  {
+    keywords: ['session', 'sessions', 'login_log', 'access_log', 'auth_log', 'online'],
+    type: 'session', label: '会话/登录表',
+    confirm: (cols, has) => cols.some(c => /session|login|logout|access|auth|online|ip|device/.test(c)),
+  },
+  // ── 库存流水表 ───────────────────────────────────────────────
+  {
+    keywords: ['inventory_log', 'stock_log', 'movement', 'warehouse', 'fulfillment', 'shipment', 'delivery'],
+    type: 'inventory_log', label: '库存流水表',
+    confirm: (cols, has) => cols.some(c => /inventory|stock|movement|in|out|warehouse|shipment|quantity/.test(c)),
+  },
+]
+
+// 模糊匹配：kw 是关键词，target 是表名
+// 匹配：直接包含 / 忽略下划线连字符后包含 / 子串匹配（kw>=3字符）
+function fuzzyMatch(kw: string, target: string): boolean {
+  if (target.includes(kw)) return true
+  const norm = kw.replace(/[_-]/g, '')
+  if (target.replace(/[_-]/g, '').includes(norm)) return true
+  if (kw.length >= 3 && target.includes(kw)) return true
+  return false
+}
+
+// 仅用列字段判断表类型（无表名时使用，也是表名不匹配时的唯一依据）
+function inferFromColumns(cols: string[]): { label: string; type: string } {
+  const has = {
+    hasAmount:   cols.some(c => /amount|revenue|income|gmv|sales|profit|fee|cost|price|tvl|volume|expense|budget|margin/.test(c)),
+    hasTime:     cols.some(c => /time|date|created|updated|period|dt$|at$|timestamp/.test(c)),
+    hasUser:     cols.some(c => /user|account|member|uid|customer|client/.test(c)),
+    hasStatus:   cols.some(c => /status|state|step|stage|result|condition/.test(c)),
+    hasEvent:    cols.some(c => /event|action|behavior|activity|trigger|method|page|funnel/.test(c)),
+    hasProduct:  cols.some(c => /product|item|sku|goods|name|title|article|content|post/.test(c)),
+    hasChannel:  cols.some(c => /channel|source|medium|platform|region|city/.test(c)),
+    hasPayment:  cols.some(c => /payment|method|pay|bank|card|wallet/.test(c)),
+    hasCategory: cols.some(c => /category|type$|tag|segment|industry|grade|level/.test(c)),
+  }
+  const colStr = cols.join(' ')
+  // 记账交易表：有金额 + (支付方式|分类) + 无商品字段
+  if (has.hasAmount && (has.hasPayment || has.hasCategory) && !/product|sku|goods|item_name|item_title/.test(colStr))
+    return { label: '记账交易表', type: 'transaction' }
+  // 电商/订单：有金额 + (商品|订单|支付|txn|transaction)
+  if (has.hasAmount && (has.hasProduct || /order|txn|transaction|purchase|sku|item/i.test(colStr)))
+    return { label: '电商/订单表', type: 'ecommerce' }
+  // 财务/收入：有金额 + 时间
+  if (has.hasAmount && has.hasTime)
+    return { label: '财务/收入表', type: 'revenue' }
+  // 记账交易表（有金额 + 支付方式，无商品名称字段）
+  if (has.hasAmount && has.hasPayment && !/product|sku|goods|item_name|item_title/i.test(colStr))
+    return { label: '记账交易表', type: 'transaction' }
+  // 转化漏斗：事件 + (用户|状态)
+  if (has.hasEvent && (has.hasUser || has.hasStatus))
+    return { label: '用户行为表', type: 'conversion' }
+  // 增长分析：用户 + 时间（无金额）
+  if (has.hasUser && has.hasTime && !has.hasAmount)
+    return { label: '增长分析', type: 'growth' }
+  // 用户分析：用户 + 时间
+  if (has.hasUser && has.hasTime)
+    return { label: '用户分析表', type: 'retention' }
+  // 运营效率：事件为主（无金额）
+  if (has.hasEvent && !has.hasAmount)
+    return { label: '运营效率表', type: 'operations' }
+  // 营销分析：渠道
+  if (has.hasChannel && (has.hasAmount || has.hasUser))
+    return { label: '营销分析表', type: 'marketing' }
+  // SaaS 指标
+  if (/plan|mrr|arr|subscription|trial/.test(colStr))
+    return { label: 'SaaS 指标表', type: 'saas' }
+  // 产品分析
+  if (/ab_test|variant|experiment|nps|feedback|funnel_drop/.test(colStr))
+    return { label: '产品分析表', type: 'product' }
+  // 内容流量
+  if (/page|view|click|traffic|seo|keyword|bounce|content|post|article/.test(colStr))
+    return { label: '内容流量表', type: 'content' }
+  // HR 表
+  if (/employee|hire|recruit|department|salary|headcount|attrition/.test(colStr))
+    return { label: '人员管理表', type: 'hr' }
+  // 商品/库存
+  if (/product|sku|inventory|stock|goods|catalog/.test(colStr) && !has.hasAmount)
+    return { label: '商品/库存表', type: 'inventory' }
+  // 工单/客服
+  if (/ticket|support|issue|complaint|case|service/.test(colStr) && has.hasStatus)
+    return { label: '工单/客服表', type: 'support' }
+  // 通知/消息
+  if (/notification|message|email_log|sms_log|push_log|mail_log|alert/.test(colStr))
+    return { label: '通知/消息表', type: 'notification' }
+  // 评价/评分
+  if (/review|rating|comment|feedback/.test(colStr) && (has.hasUser || /rating|score|star/.test(colStr)))
+    return { label: '评价/评分表', type: 'review' }
+  // 会话/登录
+  if (/session|login_log|access_log|auth_log|online/.test(colStr))
+    return { label: '会话/登录表', type: 'session' }
+  // 库存流水
+  if (/inventory_log|stock_log|movement|warehouse|fulfillment|shipment|delivery/.test(colStr) && /quantity|in|out|stock/.test(colStr))
+    return { label: '库存流水表', type: 'inventory_log' }
+  // 有金额无时间：财务表
+  if (has.hasAmount && !has.hasTime)
+    return { label: '财务分析表', type: 'finance' }
+  return { label: '通用数据表', type: 'generic' }
+}
+
+function inferTableType(colNames: string[], tableNameHint?: string): { label: string; type: string } {
+  const cols = colNames.map(c => c.toLowerCase())
+
+  // ── 第一步：表名模糊匹配（表名是强信号，直接采纳）────────────
+  if (tableNameHint) {
+    const tableLower = tableNameHint.toLowerCase()
+    for (const pattern of TABLE_NAME_PATTERNS) {
+      if (pattern.keywords.some(kw => fuzzyMatch(kw, tableLower))) {
+        // 表名匹配：优先采纳表名结果；仅当 confirm 明确否定时才继续尝试其他模式
+        if (pattern.confirm) {
+          const flags = {
+            hasAmount:   cols.some(c => /amount|revenue|income|gmv|sales|profit|fee|cost|price|tvl|volume|expense|budget|margin/.test(c)),
+            hasTime:     cols.some(c => /time|date|created|updated|period|dt$|at$|timestamp/.test(c)),
+            hasUser:     cols.some(c => /user|account|member|uid|customer|client/.test(c)),
+            hasStatus:   cols.some(c => /status|state|step|stage|result|condition/.test(c)),
+            hasProduct:  cols.some(c => /product|item|sku|goods|name|title|article|content|post/.test(c)),
+            hasChannel:  cols.some(c => /channel|source|medium|platform|region|city/.test(c)),
+            hasPayment:  cols.some(c => /payment|method|pay|bank|card|wallet/.test(c)),
+            hasCategory: cols.some(c => /category|type$|tag|segment|industry|grade|level/.test(c)),
+          }
+          if (pattern.confirm(cols, flags)) {
+            return { label: pattern.label, type: pattern.type }
+          }
+          // confirm 不匹配 → 继续尝试其他表名模式，不回退列检测
+          continue
+        }
+        return { label: pattern.label, type: pattern.type }
+      }
+    }
+  }
+
+  // ── 第二步：列字段判断（无表名时兜底）───────────────
+  return inferFromColumns(cols)
+}
+
+// 根据表类型和列名推荐快捷分析模板（过滤掉 CSV 不支持的模板）
+function getSuggestedTemplates(colNames: string[], tableType: { label: string; type: string }, columns?: any[], dbType?: string, tableNameHint?: string): string[] | null {
+  const cols = colNames.map(c => c.toLowerCase())
+  const allStr = [...cols]
+  if (tableNameHint) allStr.push(tableNameHint.toLowerCase())
+
+  const hasAmount  = cols.some(c => /amount|revenue|income|gmv|sales|profit|fee|cost|tvl|volume|expense|budget/.test(c))
+  const hasTime     = cols.some(c => /time|date|created|updated|period|at$|timestamp/.test(c))
+  const hasUser     = cols.some(c => /user|account|member|uid|customer|client/.test(c))
+  const hasStatus   = cols.some(c => /status|state|step|stage|result/.test(c))
+  const hasEvent    = cols.some(c => /event|action|behavior|activity|trigger|method|funnel/.test(c))
+  const hasCategory = cols.some(c => /category|type$|tag|segment|industry|region|channel|platform/.test(c))
+  const hasPayment  = cols.some(c => /payment|method|pay|bank|card|wallet/.test(c))
+  const hasProduct  = cols.some(c => /product|item|sku|goods|name|title|article|content/.test(c))
+
+  // ── 优先用 inferTableType 已推断出的 tableType（表名匹配，最可靠）────
+  const fallbackByType: Record<string, string[]> = {
+    ecommerce:     ['order_analysis', 'revenue_trend', 'category_performance', hasPayment ? 'payment_distribution' : '', 'repurchase_rate', 'top_n_ranking'].filter(Boolean),
+    transaction:   ['revenue_trend', 'data_overview', hasTime ? 'time_series' : '', hasCategory ? 'category_performance' : '', hasPayment ? 'payment_distribution' : '', hasStatus ? 'refund_analysis' : '', 'top_n_ranking'].filter(Boolean),
+    revenue:       ['revenue_trend', 'arpu_arppu', 'profit_trend', hasCategory ? 'category_performance' : '', hasPayment ? 'payment_distribution' : '', 'expense_analysis'].filter(Boolean),
+    growth:        ['time_series', 'new_user_acquisition', hasAmount ? 'revenue_trend' : '', 'top_n_ranking', 'data_overview'].filter(Boolean),
+    retention:     ['time_series', 'churn_analysis', hasAmount ? 'ltv_analysis' : '', hasAmount ? 'arpu_arppu' : '', 'data_overview', 'top_n_ranking'].filter(Boolean),
+    conversion:    ['conversion_funnel', 'signup_conversion', 'purchase_conversion', 'time_series', hasAmount ? 'revenue_trend' : ''].filter(Boolean),
+    operations:    ['feature_usage', 'error_analysis', 'session_analysis', hasTime ? 'time_series' : ''].filter(Boolean),
+    marketing:     ['campaign_performance', 'channel_roi', hasAmount ? 'revenue_trend' : '', 'top_n_ranking'].filter(Boolean),
+    saas:          ['mrr_arr', 'trial_conversion', hasAmount ? 'revenue_trend' : '', 'churn_mrr', 'arpu_arppu'].filter(Boolean),
+    product:       ['ab_test', 'funnel_drop_analysis', 'user_segmentation', 'nps_analysis'].filter(Boolean),
+    hr:            ['headcount_trend', 'attrition_rate', 'recruitment_pipeline'].filter(Boolean),
+    content:       ['content_performance', 'traffic_analysis', 'bounce_rate', 'search_keyword', hasTime ? 'time_series' : ''].filter(Boolean),
+    inventory:     ['product_performance', 'category_performance', 'top_n_ranking', 'data_overview'].filter(Boolean),
+    finance:       ['expense_analysis', 'arpu_arppu', 'top_n_ranking', hasCategory ? 'category_performance' : ''].filter(Boolean),
+    support:       ['data_overview', 'top_n_ranking', hasTime ? 'time_series' : ''].filter(Boolean),
+    notification:  ['time_series', 'data_overview', 'top_n_ranking'].filter(Boolean),
+    review:        ['data_overview', 'top_n_ranking', 'product_performance', hasTime ? 'time_series' : ''].filter(Boolean),
+    session:       ['session_analysis', 'time_series', 'top_n_ranking', hasUser ? 'user_segmentation' : ''].filter(Boolean),
+    inventory_log: ['time_series', 'data_overview', 'top_n_ranking', hasCategory ? 'category_performance' : ''].filter(Boolean),
+    generic:       [hasAmount ? 'revenue_trend' : hasCategory ? 'category_performance' : '', hasTime ? 'time_series' : '', 'data_overview', 'top_n_ranking'].filter(Boolean),
+  }
+
+  if (tableType.type && fallbackByType[tableType.type]) {
+    const base = fallbackByType[tableType.type]
+    const valid = base.filter(id => {
+      if (columns?.length) { const gen = generateTemplateSQL(id, '_csv_check', columns, dbType); return gen !== null }
+      return true
+    })
+    console.log('[getSuggestedTemplates] tableType.type:', tableType.type, 'base:', base, 'valid:', valid, 'columns:', columns?.map(c => c.name))
+    return valid.length > 0 ? valid : []
+  }
+
+  // ── 兜底：列字段检测（仅在无法确定表类型时使用）───────────────
+  // 记账交易类表（无商品字段）
+  if (/\b(transaction|txn|payment|bill|invoice|charge|ledger|entry)\b/i.test(allStr.join(' '))) {
+    const isEcom = /product|sku|goods|item_name|item_title/.test(cols.join(' '))
+    if (isEcom) {
+      const nameBased: string[] = ['order_analysis', 'revenue_trend']
+      if (hasCategory) nameBased.push('category_performance')
+      if (hasPayment) nameBased.push('payment_distribution')
+      if (hasStatus) nameBased.push('refund_analysis')
+      nameBased.push('top_n_ranking')
+      const valid = nameBased.filter(id => {
+        if (columns?.length) { const gen = generateTemplateSQL(id, '_csv_check', columns, dbType); return gen !== null }
+        return true
+      })
+      return valid.slice(0, 4)
+    } else {
+      const nameBased: string[] = ['revenue_trend']
+      if (hasCategory) nameBased.push('category_performance')
+      if (hasPayment) nameBased.push('payment_distribution')
+      if (hasStatus) nameBased.push('refund_analysis')
+      nameBased.push('top_n_ranking')
+      const valid = nameBased.filter(id => {
+        if (columns?.length) { const gen = generateTemplateSQL(id, '_csv_check', columns, dbType); return gen !== null }
+        return true
+      })
+      return valid.slice(0, 4)
+    }
+  }
+  // 电商/订单类表
+  if (/\b(order|orders|trade|purchase|cart|checkout)\b/i.test(allStr.join(' '))) {
+    const nameBased: string[] = ['order_analysis', 'revenue_trend']
+    if (hasCategory) nameBased.push('category_performance')
+    if (hasPayment) nameBased.push('payment_distribution')
+    if (hasStatus) nameBased.push('refund_analysis')
+    nameBased.push('repurchase_rate')
+    const valid = nameBased.filter(id => {
+      if (columns?.length) { const gen = generateTemplateSQL(id, '_csv_check', columns, dbType); return gen !== null }
+      return true
+    })
+    return valid.slice(0, 4)
+  }
+  // 财务/收入类表
+  if (/\b(revenue|income|profit|sales|gmv|earnings|billing)\b/i.test(allStr.join(' '))) {
+    const nameBased: string[] = ['revenue_trend', 'arpu_arppu']
+    if (hasCategory) nameBased.push('category_performance')
+    if (hasPayment) nameBased.push('payment_distribution')
+    nameBased.push('expense_analysis')
+    const valid = nameBased.filter(id => {
+      if (columns?.length) { const gen = generateTemplateSQL(id, '_csv_check', columns, dbType); return gen !== null }
+      return true
+    })
+    return valid.slice(0, 4)
+  }
+  // 事件/日志类表
+  if (/\b(event|log|action|activity|audit|click|visit|access)\b/i.test(allStr.join(' '))) {
+    const nameBased: string[] = ['time_series', 'data_overview']
+    if (hasUser) nameBased.push('feature_usage')
+    if (hasAmount) nameBased.push('revenue_trend')
+    if (hasStatus) nameBased.push('conversion_funnel')
+    nameBased.push('top_n_ranking')
+    const valid = nameBased.filter(id => {
+      if (columns?.length) { const gen = generateTemplateSQL(id, '_csv_check', columns, dbType); return gen !== null }
+      return true
+    })
+    return valid.slice(0, 4)
+  }
+  // 用户分析类表
+  if (/\b(user|customer|member|account|signup|register)\b/i.test(allStr.join(' '))) {
+    const nameBased: string[] = ['time_series']
+    if (hasAmount) { nameBased.push('ltv_analysis'); nameBased.push('arpu_arppu') }
+    nameBased.push('churn_analysis')
+    nameBased.push('data_overview')
+    const valid = nameBased.filter(id => {
+      if (columns?.length) { const gen = generateTemplateSQL(id, '_csv_check', columns, dbType); return gen !== null }
+      return true
+    })
+    return valid.slice(0, 4)
+  }
+  // SaaS 指标类表
+  if (/\b(mrr|arr|subscription|trial|plan|churn|cohort)\b/i.test(allStr.join(' '))) {
+    const nameBased: string[] = ['mrr_arr', 'trial_conversion']
+    if (hasAmount) nameBased.push('revenue_trend')
+    nameBased.push('churn_mrr')
+    nameBased.push('arpu_arppu')
+    const valid = nameBased.filter(id => {
+      if (columns?.length) { const gen = generateTemplateSQL(id, '_csv_check', columns, dbType); return gen !== null }
+      return true
+    })
+    return valid.slice(0, 4)
+  }
+  // 营销类表
+  if (/\b(campaign|channel|seo|ads|marketing|funnel)\b/i.test(allStr.join(' '))) {
+    const nameBased: string[] = ['campaign_performance', 'channel_roi']
+    if (hasAmount) nameBased.push('revenue_trend')
+    nameBased.push('top_n_ranking')
+    const valid = nameBased.filter(id => {
+      if (columns?.length) { const gen = generateTemplateSQL(id, '_csv_check', columns, dbType); return gen !== null }
+      return true
+    })
+    return valid.slice(0, 4)
+  }
+  // 产品分析类表
+  if (/\b(ab_test|variant|experiment|nps|feedback|funnel_drop)\b/i.test(allStr.join(' '))) {
+    const nameBased: string[] = ['ab_test', 'funnel_drop_analysis']
+    if (hasUser) nameBased.push('user_segmentation')
+    nameBased.push('nps_analysis')
+    const valid = nameBased.filter(id => {
+      if (columns?.length) { const gen = generateTemplateSQL(id, '_csv_check', columns, dbType); return gen !== null }
+      return true
+    })
+    return valid.slice(0, 4)
+  }
+  // 工单/客服类表
+  if (/\b(ticket|tickets|support|issue|complaint|case|service)\b/i.test(allStr.join(' '))) {
+    const nameBased: string[] = ['data_overview', 'top_n_ranking']
+    if (hasTime) nameBased.unshift('time_series')
+    if (hasUser) nameBased.push('user_segmentation')
+    const valid = nameBased.filter(id => {
+      if (columns?.length) { const gen = generateTemplateSQL(id, '_csv_check', columns, dbType); return gen !== null }
+      return true
+    })
+    return valid.slice(0, 4)
+  }
+  // 通知/消息类表
+  if (/\b(notification|notifications|message|messages|email_log|sms_log|push_log|mail_log|alert)\b/i.test(allStr.join(' '))) {
+    const nameBased: string[] = ['time_series', 'data_overview']
+    nameBased.push('top_n_ranking')
+    const valid = nameBased.filter(id => {
+      if (columns?.length) { const gen = generateTemplateSQL(id, '_csv_check', columns, dbType); return gen !== null }
+      return true
+    })
+    return valid.slice(0, 4)
+  }
+  // 评价/评分类表
+  if (/\b(review|reviews|rating|ratings|comment|comments)\b/i.test(allStr.join(' '))) {
+    const nameBased: string[] = ['data_overview', 'top_n_ranking']
+    if (hasTime) nameBased.unshift('time_series')
+    if (hasProduct) nameBased.push('product_performance')
+    const valid = nameBased.filter(id => {
+      if (columns?.length) { const gen = generateTemplateSQL(id, '_csv_check', columns, dbType); return gen !== null }
+      return true
+    })
+    return valid.slice(0, 4)
+  }
+  // 会话/登录类表
+  if (/\b(session|sessions|login_log|access_log|auth_log|online)\b/i.test(allStr.join(' '))) {
+    const nameBased: string[] = ['session_analysis', 'time_series']
+    nameBased.push('top_n_ranking')
+    const valid = nameBased.filter(id => {
+      if (columns?.length) { const gen = generateTemplateSQL(id, '_csv_check', columns, dbType); return gen !== null }
+      return true
+    })
+    return valid.slice(0, 4)
+  }
+  // 库存流水类表
+  if (/\b(inventory_log|stock_log|movement|warehouse|fulfillment|shipment|delivery)\b/i.test(allStr.join(' '))) {
+    const nameBased: string[] = ['data_overview', 'top_n_ranking']
+    if (hasTime) nameBased.unshift('time_series')
+    if (hasCategory) nameBased.push('category_performance')
+    const valid = nameBased.filter(id => {
+      if (columns?.length) { const gen = generateTemplateSQL(id, '_csv_check', columns, dbType); return gen !== null }
+      return true
+    })
+    return valid.slice(0, 4)
+  }
+
+  // ── 第二优先级：列字段组合（无表名时兜底）─────────────────
+  // hasAmount/hasTime 等已在第一优先级分支前声明过，此处直接复用
+  // fallbackByType 已在函数开头声明，此处直接使用
+
+  const typeFallback = fallbackByType[tableType.type] || fallbackByType.generic
+
+  // 全局补充推荐
+  const extras: string[] = []
+  if (hasAmount && hasCategory && !extras.includes('category_performance')) extras.push('category_performance')
+  if (hasAmount && hasPayment && !extras.includes('payment_distribution')) extras.push('payment_distribution')
+  if (hasAmount && hasStatus && !extras.includes('refund_analysis')) extras.push('refund_analysis')
+  if (hasAmount && hasUser && !extras.includes('ltv_analysis')) extras.push('ltv_analysis')
+  if (hasTime && hasAmount && !extras.includes('revenue_trend')) extras.push('revenue_trend')
+  if (hasTime && !extras.includes('time_series')) extras.push('time_series')
+  if (hasEvent && hasUser && !extras.includes('feature_usage')) extras.push('feature_usage')
+  if (hasStatus && !extras.includes('top_n_ranking')) extras.push('top_n_ranking')
+
+  const combined = [...typeFallback]
+  for (const s of extras) { if (!combined.includes(s)) combined.push(s) }
+
+  // CSV 模式：过滤无效模板
+  if (dbType === 'file' && columns && columns.length > 0) {
+    return combined.filter(id => generateTemplateSQL(id, '_csv_check', columns, dbType) !== null).slice(0, 4)
+  }
+  return combined.slice(0, 4)
+}
+
+/**
+ * 执行分析：自动选择分析或按模板执行
+ * templateId 可选，不传则自动推断
+ */
+// 调试接口：返回 fileTableRegistry 当前状态
+ipcMain.handle('debug:file-registry', () => {
+  const keys = [...fileTableRegistry['tables'].keys()]
+  const tables = keys.map(k => {
+    const parts = k.split('::')
+    const t = fileTableRegistry.getTable(parts[0], parts[1] || '')
+    return t ? { key: k, tableName: t.tableName, rowCount: t.rows.length, columns: t.columns.map(c => c.name) } : { key: k }
+  })
+  return { keys, tables }
+})
+
+ipcMain.handle('analysis:run', async (_, db: DatabaseConfig, tableName: string, templateId?: string) => {
+  try {
+    // 1. 获取表结构
+    let columns: any[] = []
+    const dbgDbType = db.type as string
+    const fileContent = (db as any).fileContent as string | undefined
+    const filePath = (db as any).filePath as string | undefined
+
+    if (dbgDbType === 'file' && db.id) {
+      let tables = fileTableRegistry.getTablesForDb(db.id)
+      // 优先用 fileContent（最可靠，避免路径问题）
+      if (tables.length === 0 && fileContent) {
+        try {
+          fileTableRegistry.loadFileContent(db.id, fileContent, db.database || tableName)
+          tables = fileTableRegistry.getTablesForDb(db.id)
+        } catch (e) {
+          console.warn('[analysis:run] loadFileContent failed:', e)
+        }
+      }
+      // 其次用 filePath
+      if (tables.length === 0 && filePath) {
+        try {
+          fileTableRegistry.loadFile(db.id, filePath, db.database || tableName)
+          tables = fileTableRegistry.getTablesForDb(db.id)
+        } catch (e) {
+          console.warn('[analysis:run] loadFile failed:', e)
+        }
+      }
+      const table = tables.find(t => t.tableName === tableName)
+      if (table) {
+        columns = table.columns.map((c: any) => ({ name: c.name, inferredType: c.inferredType, sampleValues: [] }))
+      }
+    }
+
+    // 真实数据库采样
+    if (columns.length === 0 && dbgDbType !== 'file') {
+      try {
+        const sample = await databaseManager.query(db, `SELECT * FROM "${tableName}" LIMIT 20`)
+        const rows = sample.rows || []
+        const colNames = sample.columns || []
+        columns = colNames.map((name: string) => ({
+          name,
+          sampleValues: rows.slice(0, 5).map((r: any) => String(r[name] ?? '')).filter(Boolean),
+          inferredType: 'string' as const,
+        }))
+        console.log('[analysis:run] sampled columns:', colNames)
+      } catch (err) {
+        console.warn('[analysis:run] sampling failed:', err)
+      }
+    }
+
+    // 2. 生成分析 SQL
+    const dbType = (db.type as string) || ''
+    const tid = templateId || autoSelectAnalysis(columns, dbType).templateId
+    const analysis = generateTemplateSQL(tid, tableName, columns, dbType)
+    if (!analysis) {
+      return { success: false, error: `不支持的分析模板: ${tid}（检测到 ${columns.length} 个字段）` }
+    }
+
+    // 3. 执行 SQL
+    let dbResult: any
+    try {
+      if (dbgDbType === 'file' && db.id) {
+        console.log('[analysis:run] executing SQL:', analysis.sql)
+        // CSV 模式：优先尝试 JS 聚合（时间类模板），否则走 SQL
+        const tables = fileTableRegistry.getTablesForDb(db.id)
+        const table = tables.find(t => t.tableName === tableName)
+        const rawRows = table?.rows || []
+        const { tryAggregateForTemplate } = require('./analysis/template-sql-generator')
+        const aggregated = tryAggregateForTemplate(tid, columns, rawRows, 'file')
+        if (aggregated) {
+          console.log('[analysis:run] JS aggregation: ' + aggregated.rowCount + ' rows')
+          dbResult = aggregated
+        } else {
+          dbResult = await databaseManager.query(db, analysis.sql)
+        }
+        console.log('[analysis:run] RESULT:', JSON.stringify({ columns: dbResult.columns, rows: dbResult.rows?.slice(0, 5), rowCount: dbResult.rowCount }))
+      } else {
+        dbResult = await databaseManager.query(db, analysis.sql)
+      }
+    } catch (err: any) {
+      return { success: false, error: `SQL执行失败：${err?.message || '未知错误'}。SQL：${analysis.sql}` }
+    }
+
+    const data = dbResult
+    return {
+      success: true,
+      data: {
+        columns: data.columns || [],
+        rows: data.rows || [],
+        rowCount: data.rowCount ?? (data.rows?.length || 0),
+        duration: data.executionTime || 0,
+        sql: analysis.sql,
+        title: analysis.title,
+        description: analysis.description,
+        charts: analysis.charts,
+      },
+    }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : '分析执行失败' }
+  }
+})
+
+/**
+ * 执行指定模板的分析（快捷分析点击时调用）
+ */
+ipcMain.handle('analysis:run-template', async (_, db: DatabaseConfig, tableName: string, templateId: string) => {
+  try {
+    // 获取表结构
+    let columns: any[] = []
+    const dbgDbType = (db.type as string) || ''
+    if (dbgDbType === 'file' && db.id) {
+      let tables = fileTableRegistry.getTablesForDb(db.id)
+      if (tables.length === 0 && (db as any).filePath) {
+        try { fileTableRegistry.loadFile(db.id, (db as any).filePath, db.database || tableName); tables = fileTableRegistry.getTablesForDb(db.id) } catch { /* ignore */ }
+      }
+      if (tables.length === 0 && (db as any).fileContent) {
+        try { fileTableRegistry.loadFileContent(db.id, (db as any).fileContent, db.database || tableName); tables = fileTableRegistry.getTablesForDb(db.id) } catch { /* ignore */ }
+      }
+      const table = tables.find(t => t.tableName === tableName)
+      if (table) columns = table.columns
+    }
+    if (columns.length === 0) {
+      try {
+        const sample = await databaseManager.query(db, `SELECT * FROM "${tableName}" LIMIT 20`)
+        const rows = sample.rows || []
+        const colNames = sample.columns || []
+        columns = colNames.map((name: string) => ({
+          name,
+          sampleValues: rows.slice(0, 5).map((r: any) => String(r[name] ?? '')).filter(Boolean),
+          inferredType: 'string' as const,
+        }))
+      } catch {
+        // 采样失败
+      }
+    }
+
+    const dbType = (db.type as string) || ''
+    const analysis = generateTemplateSQL(templateId, tableName, columns, dbType)
+    if (!analysis) {
+      return { success: false, error: `不支持的分析模板: ${templateId}` }
+    }
+
+    let dbResult: any
+    try {
+      if (dbgDbType === 'file' && db.id) {
+        const tables = fileTableRegistry.getTablesForDb(db.id)
+        const table = tables.find(t => t.tableName === tableName)
+        const rawRows = table?.rows || []
+        const { tryAggregateForTemplate } = require('./analysis/template-sql-generator')
+        const aggregated = tryAggregateForTemplate(templateId, columns, rawRows, dbType)
+        if (aggregated) {
+          dbResult = aggregated
+        } else {
+          dbResult = fileTableRegistry.query(db.id, analysis.sql)
+          dbResult = { columns: dbResult.columns, rows: dbResult.rows, rowCount: dbResult.rowCount }
+        }
+      } else {
+        dbResult = await databaseManager.query(db, analysis.sql)
+      }
+    } catch (err: any) {
+      return { success: false, error: `SQL执行失败：${err?.message || '未知错误'}。SQL：${analysis.sql}` }
+    }
+
+    const data = dbResult
+    return {
+      success: true,
+      data: {
+        columns: data.columns || [],
+        rows: data.rows || [],
+        rowCount: data.rowCount ?? (data.rows?.length || 0),
+        duration: data.executionTime || 0,
+        sql: analysis.sql,
+        title: analysis.title,
+        description: analysis.description,
+        charts: analysis.charts,
+      },
+    }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : '分析执行失败' }
   }
 })

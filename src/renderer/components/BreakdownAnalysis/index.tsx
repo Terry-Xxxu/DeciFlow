@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react'
 import { AlertTriangle, Lightbulb, Target, BarChart3 } from 'lucide-react'
+import { formatNumber, formatPercent } from '../../utils/format'
 
 interface BreakdownValue {
   key: string
@@ -48,10 +49,10 @@ export function BreakdownAnalysis({ metricName, totalChange, totalChangePercent,
           </div>
           <div className="text-right">
             <div className={`text-3xl font-bold ${changeColor}`}>
-              {changeIcon} {Math.abs(totalChangePercent).toFixed(1)}%
+              {changeIcon} {formatPercent(Math.abs(totalChangePercent))}
             </div>
             <div className="text-slate-400 text-sm mt-1">
-              {isPositive ? '+' : ''}{totalChange.toFixed(0)}
+              {isPositive ? '+' : ''}{formatNumber(totalChange, 0)}
             </div>
           </div>
         </div>
@@ -108,9 +109,9 @@ export function BreakdownAnalysis({ metricName, totalChange, totalChangePercent,
 
                       {/* 数值 */}
                       <div className="w-24 text-right flex-shrink-0">
-                        <div className="text-lg font-semibold text-slate-200">{value.value.toLocaleString()}</div>
+                        <div className="text-lg font-semibold text-slate-200">{formatNumber(value.value)}</div>
                         <div className={`text-sm font-medium ${valueChangeColor}`}>
-                          {valueIsPositive ? '+' : ''}{value.changePercent.toFixed(1)}%
+                          {valueIsPositive ? '+' : ''}{formatPercent(value.changePercent)}
                         </div>
                       </div>
 
@@ -119,7 +120,7 @@ export function BreakdownAnalysis({ metricName, totalChange, totalChangePercent,
                         <div className="flex items-center gap-2 mb-1">
                           <span className="text-xs text-slate-500">贡献度</span>
                           <span className={`text-sm font-medium ${isMaxChange ? 'text-amber-400' : 'text-slate-300'}`}>
-                            {value.contribution > 0 ? '+' : ''}{value.contribution.toFixed(1)}%
+                            {value.contribution > 0 ? '+' : ''}{formatPercent(value.contribution)}
                           </span>
                         </div>
                         <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
@@ -148,7 +149,7 @@ export function BreakdownAnalysis({ metricName, totalChange, totalChangePercent,
                 <>
                   <span className="font-medium">{breakdowns[0].values[0].label || breakdowns[0].values[0].key}</span>
                   对总变化的贡献最大（{breakdowns[0].values[0].contribution > 0 ? '+' : ''}
-                  {breakdowns[0].values[0].contribution.toFixed(1)}%），
+                  {formatPercent(breakdowns[0].values[0].contribution)}%），
                   {breakdowns[0].values[0].changePercent > 0 ? '推动了' : '拖累了'}整体{isPositive ? '增长' : '下降'}。
                 </>
               )}

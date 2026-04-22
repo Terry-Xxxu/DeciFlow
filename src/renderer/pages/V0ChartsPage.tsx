@@ -67,7 +67,8 @@ function buildChartSQL(config: ChartConfig): string {
   const { tableName } = config.dataSource
   const xAxis = config.dimensions.xAxis
   const { value, aggregation } = config.metrics
-  return `SELECT ${xAxis} AS name, ${aggregation}(${value}) AS value FROM ${tableName} GROUP BY ${xAxis} ORDER BY value DESC LIMIT 100`
+  const aggFn = aggregation === 'count_distinct' ? `COUNT(DISTINCT ${value})` : `${aggregation}(${value})`
+  return `SELECT ${xAxis} AS name, ${aggFn} AS value FROM ${tableName} GROUP BY ${xAxis} ORDER BY value DESC LIMIT 100`
 }
 
 // 图表渲染组件
@@ -112,13 +113,15 @@ function ChartRenderer({ config }: { config: ChartConfig }) {
     try {
       const sql = buildChartSQL(config)
       const result = await window.electronAPI.database.query(db, sql)
-      if (!result.rows || result.rows.length === 0) {
+      // db:query 返回 { success, data: { columns, rows, ... } }，直接 query 返回 { columns, rows, ... }
+      const rows = result.rows ?? result.data?.rows
+      if (!rows || rows.length === 0) {
         setErrorType('no_data')
       } else {
         // 将查询结果转换为 recharts 格式，字段名取自实际列名
         const xKey = config.dimensions.xAxis
         const vKey = config.metrics.value
-        const transformed = result.rows.map((row: any) => ({
+        const transformed = rows.map((row: any) => ({
           name: String(row[xKey] ?? row['name'] ?? Object.values(row)[0] ?? ''),
           value: Number(row[vKey] ?? row['value'] ?? Object.values(row)[1] ?? 0),
           ...row,

@@ -19,6 +19,8 @@ import {
   XCircle,
   Calendar,
   Clock as ClockIcon,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react"
 import { cn } from "../lib/utils"
 import {
@@ -27,6 +29,8 @@ import {
   clearQueryHistory,
   type QueryHistoryItem,
 } from "../stores/QueryHistoryStore"
+
+const PAGE_SIZE = 10
 
 interface V0Props {
   onNavigate?: (page: string) => void
@@ -42,6 +46,8 @@ export function V0HistoryPage({ onNavigate }: V0Props) {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false)
   const [itemToDelete, setItemToDelete] = useState<string | null>(null)
   const [showClearDialog, setShowClearDialog] = useState(false)
+  const [page, setPage] = useState(0)
+  const [jumpInput, setJumpInput] = useState('')
 
   // 加载历史记录
   const loadHistory = () => setHistory(getQueryHistory())
@@ -59,6 +65,12 @@ export function V0HistoryPage({ onNavigate }: V0Props) {
       item.query.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
+  const totalPages = Math.max(1, Math.ceil(filteredHistory.length / PAGE_SIZE))
+  const safePage = Math.min(page, totalPages - 1)
+  const pageItems = filteredHistory.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE)
+  const hasItems = filteredHistory.length > 0
+  const allSelected = pageItems.length > 0 && selectedItems.size === pageItems.length
+
   const handleSelect = (id: string) => {
     const next = new Set(selectedItems)
     if (next.has(id)) next.delete(id)
@@ -67,10 +79,10 @@ export function V0HistoryPage({ onNavigate }: V0Props) {
   }
 
   const handleSelectAll = () => {
-    if (selectedItems.size === filteredHistory.length) {
+    if (selectedItems.size === pageItems.length) {
       setSelectedItems(new Set())
     } else {
-      setSelectedItems(new Set(filteredHistory.map((item) => item.id)))
+      setSelectedItems(new Set(pageItems.map((item) => item.id)))
     }
   }
 
@@ -152,7 +164,7 @@ export function V0HistoryPage({ onNavigate }: V0Props) {
             placeholder="搜索历史查询..."
             className="pl-10"
             value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            onChange={(e) => { setSearchQuery(e.target.value); setPage(0) }}
           />
         </div>
         <div className="flex gap-2">
@@ -166,29 +178,30 @@ export function V0HistoryPage({ onNavigate }: V0Props) {
       </div>
 
       {/* History List */}
-      {filteredHistory.length > 0 ? (
-        <div className="space-y-3">
-          {/* Select All */}
-          <div
-            className={cn(
-              "flex items-center gap-3 px-4 py-2 rounded-lg cursor-pointer transition-colors",
-              isDark ? "bg-white/5 hover:bg-white/10" : "bg-muted/30 hover:bg-muted/50"
-            )}
-            onClick={handleSelectAll}
-          >
-            <div className={cn("relative", checkboxClass)}>
-              {selectedItems.size === filteredHistory.length && filteredHistory.length > 0 && (
-                <svg className="h-3 w-3 text-primary absolute top-0.5 left-0.5 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
+      {hasItems ? (
+        <div>
+          <div className="space-y-3">
+            {/* Select All */}
+            <div
+              className={cn(
+                "flex items-center gap-3 px-4 py-2 rounded-lg cursor-pointer transition-colors",
+                isDark ? "bg-white/5 hover:bg-white/10" : "bg-muted/30 hover:bg-muted/50"
               )}
+              onClick={handleSelectAll}
+            >
+              <div className={cn("relative", checkboxClass)}>
+                {allSelected && (
+                  <svg className="h-3 w-3 text-primary absolute top-0.5 left-0.5 pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                )}
+              </div>
+              <span className="text-sm font-medium text-foreground">
+                全选（{filteredHistory.length} 条）
+              </span>
             </div>
-            <span className="text-sm font-medium text-foreground">
-              全选（{filteredHistory.length} 条）
-            </span>
-          </div>
 
-          {filteredHistory.map((item) => (
+            {pageItems.map((item) => (
             <Card
               key={item.id}
               className={cn(
@@ -284,6 +297,77 @@ export function V0HistoryPage({ onNavigate }: V0Props) {
               </CardContent>
             </Card>
           ))}
+          </div>
+          {totalPages > 1 ? (
+          <div className="flex items-center justify-between border-t border-border px-6 py-3">
+            <span className="text-sm text-muted-foreground">
+              第 {safePage + 1} / {totalPages} 页
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground"
+                disabled={safePage === 0}
+                onClick={() => { setPage(0); setSelectedItems(new Set()) }}
+              >
+                首页
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground"
+                disabled={safePage === 0}
+                onClick={() => { setPage((p) => p - 1); setSelectedItems(new Set()) }}
+              >
+                上一页
+              </Button>
+              <span className="text-sm text-muted-foreground min-w-[80px] text-center">
+                {safePage + 1} / {totalPages}
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground"
+                disabled={safePage >= totalPages - 1}
+                onClick={() => { setPage((p) => p + 1); setSelectedItems(new Set()) }}
+              >
+                下一页
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground"
+                disabled={safePage >= totalPages - 1}
+                onClick={() => { setPage(totalPages - 1); setSelectedItems(new Set()) }}
+              >
+                末页
+              </Button>
+              <div className="flex items-center gap-1 ml-2 border border-border rounded-md px-2 py-1">
+                <span className="text-xs text-muted-foreground">跳至</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={totalPages}
+                  className="w-12 text-xs bg-transparent text-foreground text-center outline-none"
+                  value={jumpInput}
+                  onChange={(e) => setJumpInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      const p = parseInt(jumpInput, 10)
+                      if (!isNaN(p) && p >= 1 && p <= totalPages) {
+                        setPage(p - 1)
+                        setJumpInput('')
+                        setSelectedItems(new Set())
+                      }
+                    }
+                  }}
+                />
+                <span className="text-xs text-muted-foreground">页</span>
+              </div>
+            </div>
+          </div>
+          ) : null}
         </div>
       ) : (
         <Card className="p-12 text-center">

@@ -130,6 +130,18 @@ const electronAPI = {
   analysis: {
     analyze: (request: any) => ipcRenderer.invoke('analysis:analyze', request),
     generateSummary: (result: any) => ipcRenderer.invoke('analysis:generateSummary', result),
+    // 识别表类型（采样推断）
+    recognizeTable: (db: any, tableName: string) =>
+      ipcRenderer.invoke('analysis:recognize-table', db, tableName),
+    // 执行分析（自动选择或指定模板）
+    run: (db: any, tableName: string, templateId?: string) =>
+      ipcRenderer.invoke('analysis:run', db, tableName, templateId),
+    // 执行指定模板的分析
+    runTemplate: (db: any, tableName: string, templateId: string) =>
+      ipcRenderer.invoke('analysis:run-template', db, tableName, templateId),
+    // 获取表数据预览（前 N 行）
+    getTableData: (db: any, tableName: string, limit?: number) =>
+      ipcRenderer.invoke('analysis:getTableData', db, tableName, limit),
   },
 
   // ========== 新分析引擎 (Analyze Mode) API ==========
@@ -245,6 +257,14 @@ const electronAPI = {
   file: {
     // 读取文件内容（由主进程通过 Node.js fs 读取）
     read: (filePath: string) => ipcRenderer.invoke('file:read', filePath),
+    // 注册文件到 FileTableRegistry（读取内容并加载到内存）
+    register: (dbId: string, filePath: string, fileName: string, content?: string) =>
+      ipcRenderer.invoke('file:register', dbId, filePath, fileName, content),
+    // 获取文件表的列信息
+    getTable: (dbId: string, tableName: string) =>
+      ipcRenderer.invoke('file:get-table', dbId, tableName),
+    // 调试：获取 fileTableRegistry 状态
+    debugRegistry: () => ipcRenderer.invoke('debug:file-registry'),
   },
 
   // ========== 自然语言查询 API ==========

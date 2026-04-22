@@ -1,3 +1,10 @@
+// 模块级变量：保存分析结果，切换页面不丢失
+let _persistedQueryResult: any = null
+let _persistedQueryError: any = null
+let _persistedChartRecommendation: any = null
+let _persistedTableInfo: any = null
+let _persistedAiInsights: any[] = []
+let _persistedTableName: string = ''
 
 import { useState, useEffect, useRef } from "react"
 import { PageLayout } from "../components/v0-layout/PageLayout"
@@ -9,12 +16,14 @@ import { ChartPreview } from "../components/v0-dashboard/ChartPreview"
 import { QuickActions } from "../components/v0-dashboard/QuickActions"
 import { RecentQueries } from "../components/v0-dashboard/RecentQueries"
 import { EmptyStates } from "../components/v0-dashboard/EmptyStates"
+import { TableSchemaOverview } from "../components/v0-dashboard/TableSchemaOverview"
 import { useDatabase } from "../stores/DatabaseStore"
 import { useProjects } from "../stores/ProjectStore"
+import { useAnalysisTemplates } from "../stores/AnalysisTemplateStore"
 import { addQueryToHistory } from "../stores/QueryHistoryStore"
 import { showToast } from "../lib/download"
 import { cn } from "../lib/utils"
-import { AlertTriangle, ChevronDown, Check, Database, Zap, FolderOpen } from "lucide-react"
+import { AlertTriangle, ChevronDown, Check, Database, Zap, FolderOpen, Table } from "lucide-react"
 
 interface QueryResult {
   columns: string[]
@@ -37,16 +46,18 @@ interface V0DashboardPageProps {
 export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
   const { databases } = useDatabase()
   const { projects } = useProjects()
+  const { setRecommendedIds } = useAnalysisTemplates()
   const connectedDatabases = databases.filter((db) => db.connected)
   const hasDataSource = connectedDatabases.length > 0
 
   const [isLoading, setIsLoading] = useState(false)
   const [loadingStage, setLoadingStage] = useState<string>('')
-  const [queryResult, setQueryResult] = useState<QueryResult | null>(null)
-  const [queryError, setQueryError] = useState<string | null>(null)
+  const [queryResult, setQueryResult] = useState<QueryResult | null>(_persistedQueryResult)
+  const [queryError, setQueryError] = useState<string | null>(_persistedQueryError)
   const [pendingQuery, setPendingQuery] = useState<string | undefined>(undefined)
-  const [chartRecommendation, setChartRecommendation] = useState<ChartRecommendation | null>(null)
-  const [aiInsights, setAiInsights] = useState<any[]>([])
+  const [chartRecommendation, setChartRecommendation] = useState<ChartRecommendation | null>(_persistedChartRecommendation)
+  const [tableInfo, setTableInfo] = useState<any>(_persistedTableInfo)
+  const [aiInsights, setAiInsights] = useState<any[]>(_persistedAiInsights)
   const [isInsightLoading, setIsInsightLoading] = useState(false)
   // 多选数据源 ID：空数组 = 全部
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -57,11 +68,60 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
   const [loadingTables, setLoadingTables] = useState<Set<string>>(new Set())
   // 当前展开的数据库（点击后展开显示表格）
   const [expandedDbId, setExpandedDbId] = useState<string | null>(null)
+
+  // 当前选中的表名（从 selectedIds/selectedTables 派生，用于 JSX）
+  const currentTableName = (() => {
+    const dbId = selectedIds[0] || connectedDatabases[0]?.id
+    if (!dbId) return undefined
+    const db = connectedDatabases.find(d => d.id === dbId)
+    if (!db) return undefined
+    const selTables = selectedTables[dbId] || []
+    if ((db as any).type === 'file') {
+      const name = (db as any).database
+      return typeof name === 'string' ? name.replace(/\.[^/.]+$/, '') : (selTables[0] || 'data')
+    }
+    return selTables[0] || db.database || db.name
+  })()
+  // 当前选中的数据库（同上派生）
+  const currentDb = (() => {
+    const dbId = selectedIds[0] || connectedDatabases[0]?.id
+    return dbId ? (connectedDatabases.find(d => d.id === dbId) || connectedDatabases[0]) : connectedDatabases[0]
+  })()
   // AI 是否已配置
   const [hasAI, setHasAI] = useState(false)
   // 分析目标选择器下拉状态
   const [selectorOpen, setSelectorOpen] = useState(false)
   const selectorRef = useRef<HTMLDivElement>(null)
+
+  // ── 持久化辅助：同时更新 React state 和模块级变量 ────────────────────────
+  const persistResult = (result: any) => {
+    setQueryResult(result)
+    _persistedQueryResult = result
+    _persistedQueryError = null
+  }
+  const persistError = (error: string | null) => {
+    setQueryError(error)
+    _persistedQueryError = error
+    _persistedQueryResult = null
+  }
+  const persistChart = (rec: any) => {
+    setChartRecommendation(rec)
+    _persistedChartRecommendation = rec
+  }
+  const persistTableInfo = (info: any) => {
+    setTableInfo(info)
+    _persistedTableInfo = info
+  }
+  const persistInsights = (insights: any[]) => {
+    setAiInsights(insights)
+    _persistedAiInsights = insights
+  }
+  const clearResults = () => {
+    setQueryResult(null); _persistedQueryResult = null
+    setQueryError(null); _persistedQueryError = null
+    setChartRecommendation(null); _persistedChartRecommendation = null
+    setAiInsights([]); _persistedAiInsights = []
+  }
 
   useEffect(() => {
     window.electronAPI.ai.isReady().then(setHasAI).catch(() => setHasAI(false))
@@ -155,6 +215,174 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
     })
   }
 
+  // ── 一键分析：自动识别表类型，执行对应的统计 SQL ──────────────────────────
+  const handleOneClickAnalysis = async () => {
+    if (connectedDatabases.length === 0) {
+      showToast("请先连接数据库", "error")
+      return
+    }
+    const primaryDb = selectedIds.length > 0
+      ? (connectedDatabases.find(d => d.id === selectedIds[0]) || connectedDatabases[0])
+      : connectedDatabases[0]
+    const db = primaryDb
+
+    // 确定表名
+    const dbId = selectedIds[0] || connectedDatabases[0]?.id
+    const selectedTableNames = dbId ? (selectedTables[dbId] || []) : []
+    const tableName = (() => {
+      if ((db as any).type === 'file') {
+        const name = (db as any).database
+        return typeof name === 'string' ? name.replace(/\.[^/.]+$/, '') : (selectedTableNames[0] || 'data')
+      }
+      return selectedTableNames[0] || db.database || db.name
+    })()
+
+    setIsLoading(true)
+    setLoadingStage('正在识别表类型…')
+    clearResults()
+
+    try {
+      // Step 1: 识别表类型
+      const recResult = await (window as any).electronAPI.analysis.recognizeTable(db, tableName)
+      setLoadingStage('正在分析数据…')
+      const tableInfo = recResult.success ? recResult.data : null
+      persistTableInfo(tableInfo)
+      const tableType = tableInfo?.tableType || '未知类型'
+      // 根据识别的表类型更新推荐模板
+      if (tableInfo?.suggestedTemplateIds?.length > 0) {
+        setRecommendedIds(tableInfo.suggestedTemplateIds)
+      }
+      showToast(`识别为：${tableType}，已推荐相关快捷分析`, "info")
+
+      // Step 2: 执行自动分析
+      const result = await (window as any).electronAPI.analysis.run(db, tableName)
+      if (!result.success) {
+        throw new Error(result.error || '分析执行失败')
+      }
+
+      const data = result.data
+      persistResult({
+        columns: data.columns || [],
+        rows: data.rows || [],
+        rowCount: data.rowCount || 0,
+        duration: data.duration || 0,
+        sql: data.sql || '',
+      })
+
+      // 图表推荐
+      if (data.charts?.length > 0) {
+        persistChart(data.charts[0])
+      }
+
+      setLoadingStage('')
+    } catch (err: any) {
+      persistError(err?.message || "一键分析失败")
+      showToast(err?.message || "分析失败", "error")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // ── 执行自定义 SQL ──────────────────────────────────────────────────────────
+  const handleSqlSubmit = async (sql: string) => {
+    if (!sql.trim()) return
+    if (connectedDatabases.length === 0) {
+      showToast("请先连接数据库", "error")
+      return
+    }
+    const primaryDb = selectedIds.length > 0
+      ? (connectedDatabases.find(d => d.id === selectedIds[0]) || connectedDatabases[0])
+      : connectedDatabases[0]
+    const db = primaryDb
+
+    setIsLoading(true)
+    setLoadingStage('正在执行 SQL…')
+    clearResults()
+
+    try {
+      const dbResult = await (window as any).electronAPI.database.query(db, sql)
+      if (!dbResult.success) {
+        throw new Error(dbResult.error || "查询执行失败")
+      }
+      const data = dbResult.data || dbResult
+      persistResult({
+        columns: data.columns || [],
+        rows: data.rows || [],
+        rowCount: data.rowCount ?? (data.rows?.length || 0),
+        duration: dbResult.executionTime || 0,
+        sql,
+      })
+      setLoadingStage('')
+    } catch (err: any) {
+      persistError(err?.message || "SQL 执行失败")
+      showToast(err?.message || "SQL 执行失败", "error")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // ── 执行模板分析（快捷分析点击）────────────────────────────────────────────
+  // ① 填入自然语言到输入框（用户可见，可调整）② 同时后台直接执行模板 SQL（无需 AI）
+  const handleTemplateRun = async (templateId: string, templateName: string) => {
+    if (connectedDatabases.length === 0) {
+      showToast("请先选择数据源", "error")
+      return
+    }
+
+    // ① 填入自然语言，让用户看到分析意图
+    const templateNLMap: Record<string, string> = {
+      user_growth_trend: '分析最近30天的新增用户增长趋势，按天统计',
+      dau_wau_mau: '统计最近30天的日活跃用户数（DAU）、周活跃（WAU）和月活跃（MAU）',
+      new_user_acquisition: '按来源渠道统计新用户数量，对比各渠道的获客效果',
+      growth_rate: '计算最近3个月的用户数、收入的环比增长率',
+      user_retention: '计算用户的次日留存率（D1）、7日留存率（D7）和30日留存率（D30）',
+      churn_analysis: '分析近90天内流失的用户比例，流失定义为超过30天未活跃',
+      cohort_retention: '生成同期群分析：按注册月份分组，查看各月用户在后续每月的留存情况',
+      revenue_trend: '统计最近6个月每月的总收入，展示收入趋势',
+      arpu_arppu: '计算过去30天的ARPU（每活跃用户平均收入）和ARPPU（每付费用户平均收入）',
+      ltv_analysis: '按注册渠道统计用户的累计消费金额（LTV），找出高价值用户来源',
+      payment_distribution: '分析用户付款金额的分布：0-100、100-500、500-2000、2000以上各区间的用户占比',
+      conversion_funnel: '分析用户从注册到首次付款的转化漏斗，计算每步的转化率',
+      signup_conversion: '分析最近7天每天的注册转化率，即注册用户数/访问用户数',
+      purchase_conversion: '统计最近30天活跃用户中完成首次购买的比例，按来源渠道分组对比',
+      feature_usage: '统计各功能模块的使用次数和使用用户数，找出最受欢迎的功能',
+      session_analysis: '分析用户平均会话时长、每日会话次数分布，以及高峰使用时段',
+      peak_hour_analysis: '分析用户每天24小时的活跃分布，找出流量最高和最低的时段',
+      error_analysis: '统计最近7天出现最多的错误类型TOP10，以及每种错误影响的用户数',
+      order_analysis: '统计最近30天每天的订单数量、总GMV和平均客单价，展示趋势',
+      repurchase_rate: '计算最近90天的用户复购率，以及购买次数的分布情况',
+      product_performance: '统计销售量前10的商品，以及各商品的收入贡献占比',
+      category_performance: '按商品品类统计本月销售额和占比，并与上月对比变化',
+      regional_sales: '按省份统计本季度销售额TOP10，以及各省的客单价对比',
+      cart_abandonment: '分析最近30天的购物车放弃率，以及放弃率最高的商品类目',
+      expense_analysis: '按支出类别统计最近3个月的支出总额，并展示各类别的占比',
+      profit_trend: '对比每月的收入和支出，计算净利润并展示利润率趋势',
+      refund_analysis: '分析最近30天的退款率，以及退款最多的商品品类和退款原因分布',
+      content_performance: '统计浏览量前10的内容，并分析内容的平均互动率（点赞+评论/浏览）',
+      traffic_analysis: '分析最近7天的总PV、UV，以及流量来源（直接访问/搜索/社交媒体）分布',
+      bounce_rate: '统计各页面的跳出率（访问后直接离开的比例），并找出跳出率最高的落地页',
+      mrr_arr: '统计每月的MRR（月度经常性收入）变化趋势，以及新签、扩容、流失的MRR构成',
+      trial_conversion: '分析最近3个月每月的试用转付费转化率，以及从注册到付费的平均天数',
+      plan_distribution: '统计各套餐（基础版/专业版/企业版）的订阅用户数和收入贡献占比',
+      ab_test: '对比A/B实验中实验组和对照组的转化率、人均收入，判断实验是否显著',
+      funnel_drop_analysis: '分析用户在注册流程（填写信息→验证邮箱→完善资料→首次登录）中各步的流失率',
+      user_segmentation: '按活跃程度（高/中/低）和消费金额（高/中/低）将用户分为9个象限，统计各群体规模',
+      headcount_trend: '统计每月的员工总数变化，以及各部门的人员规模对比',
+      attrition_rate: '计算最近12个月的员工离职率（年化），以及主要离职原因的分布',
+      data_overview: '对这张表做一个基础统计概览，包括总记录数、各字段的取值分布',
+      time_series: '按时间维度统计主要指标的变化趋势，找出波峰和波谷',
+      top_n_ranking: '按某个维度（如城市、渠道、品类）统计数值指标的TOP10排名',
+      anomaly_detection: '检测数据中的异常值：找出订单金额、用户消费等字段中明显偏离正常范围的记录',
+    }
+    const nlQuery = templateNLMap[templateId] || `执行${templateName}分析`
+
+    // 只做一件事：把 NL 语句填入输入框，滚动到顶部让用户看到
+    // 用户按回车后，QueryInput 会触发 handleQuery 执行自然语言分析
+    setPendingQuery(nlQuery)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+    showToast(`${templateName} 已填入输入框，按回车执行`, "info")
+  }
+
   const handleQuery = async (query: string) => {
     if (!query.trim()) return
     if (connectedDatabases.length === 0) {
@@ -166,7 +394,7 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
 
     // 无 AI + 多表：直接拦截
     if (isMultiSelect && !hasAI) {
-      setQueryError("多表关联分析需要配置 AI。请前往「设置」添加 AI API Key，或只选择单个数据表。")
+      persistError("多表关联分析需要配置 AI。请前往「设置」添加 AI API Key，或只选择单个数据表。")
       return
     }
 
@@ -176,102 +404,9 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
       : connectedDatabases[0]
     const db = primaryDb
 
-    // ── Demo 数据库 + 无 AI：跑统计 SQL，给出有意义的分析结果 ──
-    const isDemoDb = db.type === 'demo'
-    if (isDemoDb && !hasAI) {
-      const dbId = selectedIds[0] || connectedDatabases[0]?.id
-      const tables = dbId ? (selectedTables[dbId] || []) : []
-      const targetTables = tables.length > 0 ? tables : ['users']
-      setIsLoading(true)
-      setLoadingStage('正在分析表结构…')
-      setQueryError(null)
-      setQueryResult(null)
-      setChartRecommendation(null)
-      setAiInsights([])
-      try {
-        const tableName = targetTables[0]
-
-        // Step 1: 先拿字段信息
-        setLoadingStage('获取字段…')
-        const schemaResult = await window.electronAPI.database.query(
-          db, `SELECT * FROM "${tableName}" WHERE 1=0`
-        )
-        const columns: string[] = schemaResult.data?.columns || schemaResult.columns || []
-        if (columns.length === 0) throw new Error('无法获取表结构')
-
-        // Step 2: 跑 COUNT 等统计
-        setLoadingStage('统计记录数…')
-        const countResult = await window.electronAPI.database.query(
-          db, `SELECT COUNT(*) as cnt FROM "${tableName}"`
-        )
-        const totalRows = countResult.data?.rows?.[0]?.cnt ?? 0
-
-        // Step 3: 跑各字段统计（数字字段取 min/max/avg，非数字取 count distinct + top5）
-        const analysisRows: Record<string, any>[] = []
-        for (const col of columns) {
-          const lowerCol = col.toLowerCase()
-          const isNumeric = /^(id|amount|price|stock|count|total|sum|value|num|qty)$/i.test(col) ||
-            col.includes('_id') || col.includes('count') || col.includes('amount') ||
-            col.includes('price') || col.includes('total')
-
-          const colResult = await window.electronAPI.database.query(
-            db,
-            isNumeric
-              ? `SELECT MIN("${col}") as min_val, MAX("${col}") as max_val, AVG("${col}") as avg_val FROM "${tableName}"`
-              : `SELECT COUNT(DISTINCT "${col}") as distinct_count FROM "${tableName}"`
-          )
-          const row0 = colResult.data?.rows?.[0]
-          analysisRows.push({
-            字段: col,
-            类型: isNumeric ? '数值' : '文本',
-            ...(isNumeric
-              ? {
-                  最小值: row0?.min_val != null ? Number(row0.min_val).toFixed(2) : '—',
-                  最大值: row0?.max_val != null ? Number(row0.max_val).toFixed(2) : '—',
-                  平均值: row0?.avg_val != null ? Number(row0.avg_val).toFixed(2) : '—',
-                }
-              : {
-                  不同值数: row0?.distinct_count ?? 0,
-                }),
-          })
-        }
-
-        const result: QueryResult = {
-          columns: analysisRows.length > 0 ? Object.keys(analysisRows[0]) : [],
-          rows: analysisRows,
-          rowCount: totalRows,
-          duration: 0,
-          sql: `统计分析 — ${tableName}`,
-        }
-        setQueryResult(result)
-        setLoadingStage('')
-
-        // 同时跑原始数据样本供图表推荐用
-        const sampleResult = await window.electronAPI.database.query(
-          db, `SELECT * FROM "${tableName}" LIMIT 100`
-        )
-        if (sampleResult.success) {
-          window.electronAPI.charts.recommend(sampleResult.data)
-            .then((rec: any) => { if (rec?.type) setChartRecommendation(rec) })
-            .catch(() => {})
-        }
-        addQueryToHistory(query, "success", totalRows, '0ms')
-      } catch (err: any) {
-        setQueryError(err?.message || "分析失败")
-        addQueryToHistory(query, "error")
-        showToast(err?.message || "分析失败", "error")
-      } finally {
-        setIsLoading(false)
-      }
-      return
-    }
-
     setIsLoading(true)
     setLoadingStage('正在生成 SQL…')
-    setQueryError(null)
-    setQueryResult(null)
-    setChartRecommendation(null)
-    setAiInsights([])
+    clearResults()
 
     const startTime = Date.now()
 
@@ -303,10 +438,10 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
       const sqlResult = await window.electronAPI.nl.generateSQL(db.type, query, nlContext)
 
       if (!sqlResult.success || !sqlResult.sql) {
-        if (sqlResult.needsAI) {
-          throw new Error(sqlResult.message || "此查询需要 AI 支持，请前往设置配置 API Key")
+        if (sqlResult.needsAI || !hasAI) {
+          throw new Error("AI 未配置，无法理解此查询。配置 AI Key 后可使用自然语言分析，或点击「一键概览」自动分析。")
         }
-        throw new Error(sqlResult.error || sqlResult.message || "SQL 生成失败，请检查 AI 配置")
+        throw new Error(sqlResult.error || sqlResult.message || "SQL 生成失败")
       }
 
       const generatedSQL = sqlResult.sql
@@ -332,12 +467,12 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
         duration,
         sql: finalSQL,
       }
-      setQueryResult(result)
+      persistResult(result)
       setLoadingStage('')
 
       // Step 4 + 5: 图表推荐 & AI 洞察并行执行
       const chartPromise = window.electronAPI.charts.recommend(resultData)
-        .then((rec: any) => { if (rec?.type) setChartRecommendation(rec) })
+        .then((rec: any) => { if (rec?.type) persistChart(rec) })
         .catch((err: any) => console.warn('图表推荐失败:', err?.message))
 
       const insightPromise = hasAI ? (() => {
@@ -350,7 +485,7 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
             const match = text.match(/\[[\s\S]*\]/)
             if (match) {
               const parsed = JSON.parse(match[0])
-              setAiInsights(Array.isArray(parsed) ? parsed.slice(0, 3) : [])
+              persistInsights(Array.isArray(parsed) ? parsed.slice(0, 3) : [])
             }
           } catch (parseErr) {
             console.warn('AI 洞察解析失败:', parseErr)
@@ -360,13 +495,13 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
         }).finally(() => setIsInsightLoading(false))
       })() : Promise.resolve()
 
-      // 并行等待（不阻塞主流程，已通过 setQueryResult 展示结果）
+      // 并行等待（不阻塞主流程，已通过 persistResult 展示结果）
       Promise.allSettled([chartPromise, insightPromise])
 
       addQueryToHistory(query, "success", result.rowCount, `${duration}ms`)
     } catch (err: any) {
-      const errorMsg = err?.message || "查询失败"
-      setQueryError(errorMsg)
+      const errorMsg = err?.message || (err as any)?.response?.message || (err as any)?.message || "查询失败"
+      persistError(errorMsg)
       setLoadingStage('')
       addQueryToHistory(query, "error")
       showToast(errorMsg, "error")
@@ -542,21 +677,28 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
 
             {/* 一键概览 */}
             <button
-              onClick={() => {
-                if (selectedIds.length === 0) {
-                  handleQuery('对所有数据表做基础统计分析，列出每张表的记录数')
-                } else if (selectedIds.length === 1) {
-                  handleQuery('对选中的表做一个基础统计分析，包括总记录数、主要字段的分布情况')
-                } else {
-                  handleQuery('对所有数据表做基础统计分析，列出每张表的记录数')
-                }
-              }}
+              onClick={handleOneClickAnalysis}
               disabled={isLoading}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
             >
               <Zap className="h-3.5 w-3.5" />
-              {selectedIds.length === 0 ? '全部分析' : '一键概览'}
+              一键分析
             </button>
+            {/* 表概览按钮：点击展开/收起概览 */}
+            {tableInfo && (
+              <button
+                onClick={() => {
+                  // 触发 TableSchemaOverview 的展开状态，需要通过 DOM 操作
+                  const btn = document.querySelector('[data-table-overview] button')
+                  btn?.click()
+                }}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/30 hover:bg-blue-500/20 transition-all flex-shrink-0"
+                title="查看当前表的字段结构"
+              >
+                <Table className="h-3.5 w-3.5" />
+                表概览
+              </button>
+            )}
           </div>
 
           {/* 多表无 AI 警告 */}
@@ -577,9 +719,15 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
         </div>
       )}
 
+      {/* 表概览弹窗（需挂载在页面中才能被按钮触发） */}
+      {tableInfo && currentTableName && (
+        <TableSchemaOverview tableInfo={tableInfo} tableName={currentTableName} db={currentDb} />
+      )}
+
       {/* Query Input */}
       <QueryInput
         onSubmit={handleQuery}
+        onSqlSubmit={handleSqlSubmit}
         isLoading={isLoading}
         pendingQuery={pendingQuery}
         onPendingQueryConsumed={() => setPendingQuery(undefined)}
@@ -604,6 +752,7 @@ export function V0DashboardPage({ onNavigate }: V0DashboardPageProps) {
               setPendingQuery(q)
               window.scrollTo({ top: 0, behavior: 'smooth' })
             }}
+            onTemplateRun={(id, name) => handleTemplateRun(id, name)}
           />
 
           {/* 查询错误提示 */}

@@ -1,5 +1,6 @@
 
 import { Activity, Hash, Clock, Table } from "lucide-react"
+import { formatNumber } from '../../utils/format'
 
 interface QueryResult {
   columns: string[]
@@ -16,8 +17,10 @@ interface StatsCardsProps {
 export function StatsCards({ result }: StatsCardsProps) {
   const { columns, rows, rowCount, duration } = result
 
-  // 找第一个数字列的合计/最大值
+  // 找第一个真正有意义的数字列（排除 id 列和 name 列）
   const numericCols = columns.filter((col) => {
+    const colLower = col.toLowerCase()
+    if (colLower === 'name' || colLower === 'id') return false
     const sample = rows[0]?.[col]
     return typeof sample === "number" || (!isNaN(Number(sample)) && sample !== null && sample !== "")
   })
@@ -30,7 +33,7 @@ export function StatsCards({ result }: StatsCardsProps) {
   const stats = [
     {
       label: "返回行数",
-      value: rowCount.toLocaleString(),
+      value: formatNumber(rowCount),
       icon: Hash,
       color: "text-chart-1",
       bgColor: "bg-chart-1/10",
@@ -52,12 +55,8 @@ export function StatsCards({ result }: StatsCardsProps) {
     ...(firstNumCol && sum !== null
       ? [
           {
-            label: `合计 ${firstNumCol}`,
-            value: sum > 1000000
-              ? `${(sum / 1000000).toFixed(1)}M`
-              : sum > 1000
-              ? `${(sum / 1000).toFixed(1)}K`
-              : sum.toLocaleString(),
+            label: firstNumCol === 'value' ? '合计计数' : `合计 ${firstNumCol}`,
+            value: formatNumber(sum),
             icon: Activity,
             color: "text-chart-4",
             bgColor: "bg-chart-4/10",

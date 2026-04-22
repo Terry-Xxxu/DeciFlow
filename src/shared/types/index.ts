@@ -13,6 +13,7 @@ export enum DatabaseType {
 }
 
 export interface DatabaseConfig {
+  id?: string
   type: DatabaseType | string
   host: string
   port: number
@@ -24,6 +25,7 @@ export interface DatabaseConfig {
   sslRejectUnauthorized?: boolean  // 是否严格验证服务器证书（默认 false，自签名证书需关闭）
   isSRV?: boolean                  // mongodb+srv:// 协议（Atlas 等）
   rawConnectionString?: string     // SRV 模式下保存原始连接字符串供 MongoClient 直接使用
+  filePath?: string               // 文件上传时的真实路径（仅 file 类型使用）
 }
 
 // AI 服务类型

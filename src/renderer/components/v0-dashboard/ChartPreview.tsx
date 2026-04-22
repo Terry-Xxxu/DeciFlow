@@ -4,6 +4,7 @@ import { useState, useRef } from "react"
 import { Button } from "../v0-ui/Button"
 import { BarChart3, LineChart, PieChart, Download, Check } from "lucide-react"
 import { downloadChartAsImage, showToast, downloadAsCSV } from "../../lib/download"
+import { formatNumber } from "../../utils/format"
 import { cn } from "../../lib/utils"
 import {
   AreaChart,
@@ -122,9 +123,11 @@ export function ChartPreview({ result, recommendation }: ChartPreviewProps) {
                 backgroundColor: "hsl(var(--card))",
                 border: "1px solid hsl(var(--border))",
                 borderRadius: "12px",
+                color: "hsl(var(--foreground))",
               }}
+              formatter={(value: number) => [formatNumber(value), '']}
             />
-            <Legend />
+            <Legend wrapperStyle={{ color: "hsl(var(--foreground))" }} />
           </RePieChart>
         </ResponsiveContainer>
       )
@@ -142,7 +145,9 @@ export function ChartPreview({ result, recommendation }: ChartPreviewProps) {
                 backgroundColor: "hsl(var(--card))",
                 border: "1px solid hsl(var(--border))",
                 borderRadius: "12px",
+                color: "hsl(var(--foreground))",
               }}
+              formatter={(value: number) => [formatNumber(value), '']}
             />
             {yKeys.slice(0, 4).map((key, i) => (
               <Bar key={key} dataKey={key} fill={COLORS[i % COLORS.length]} radius={[4, 4, 0, 0]} />
@@ -172,6 +177,7 @@ export function ChartPreview({ result, recommendation }: ChartPreviewProps) {
               backgroundColor: "hsl(var(--card))",
               border: "1px solid hsl(var(--border))",
               borderRadius: "12px",
+              color: "hsl(var(--foreground))",
             }}
           />
           {yKeys.slice(0, 4).map((key, i) => (
@@ -209,7 +215,7 @@ export function ChartPreview({ result, recommendation }: ChartPreviewProps) {
           <Button
             variant="ghost"
             size="sm"
-            className={cn("h-7", chartType === "line" && "bg-background shadow-sm")}
+            className={cn("h-7 text-muted-foreground", chartType === "line" && "bg-background shadow-sm text-foreground")}
             onClick={() => setChartType("line")}
           >
             <LineChart className="h-4 w-4" />
@@ -217,7 +223,7 @@ export function ChartPreview({ result, recommendation }: ChartPreviewProps) {
           <Button
             variant="ghost"
             size="sm"
-            className={cn("h-7", chartType === "bar" && "bg-background shadow-sm")}
+            className={cn("h-7 text-muted-foreground", chartType === "bar" && "bg-background shadow-sm text-foreground")}
             onClick={() => setChartType("bar")}
           >
             <BarChart3 className="h-4 w-4" />
@@ -225,7 +231,7 @@ export function ChartPreview({ result, recommendation }: ChartPreviewProps) {
           <Button
             variant="ghost"
             size="sm"
-            className={cn("h-7", chartType === "pie" && "bg-background shadow-sm")}
+            className={cn("h-7 text-muted-foreground", chartType === "pie" && "bg-background shadow-sm text-foreground")}
             onClick={() => setChartType("pie")}
           >
             <PieChart className="h-4 w-4" />
@@ -235,7 +241,7 @@ export function ChartPreview({ result, recommendation }: ChartPreviewProps) {
 
       {/* Chart */}
       <div className="p-5">
-        <div className="h-[300px] w-full" ref={chartContainerRef}>
+        <div className="h-[300px] w-full text-foreground" ref={chartContainerRef}>
           {renderChart()}
         </div>
       </div>

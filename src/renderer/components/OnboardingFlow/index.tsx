@@ -607,8 +607,18 @@ JSON 格式（严格遵守，字段均为小写）:
 
 // ─── Main Component ──────────────────────────────────────────────────────────
 
+// 读取文件内容（用于 onboarding 导入时注册到 fileTableRegistry）
+function readFileContent(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(reader.result as string)
+    reader.onerror = () => reject(new Error('文件读取失败'))
+    reader.readAsText(file)
+  })
+}
+
 interface OnboardingFlowProps {
-  onComplete: (csvFiles?: { name: string; path?: string }[]) => void
+  onComplete: (csvFiles?: { name: string; path?: string; content?: string }[]) => void
   onClose: () => void
 }
 
@@ -617,7 +627,7 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete, onCl
   const [currentStep, setCurrentStep] = useState<OnboardingStep>('welcome')
   const [selectedMethod, setSelectedMethod] = useState<'sample' | 'csv' | 'database' | null>(null)
   const [connectMethod, setConnectMethod] = useState<DbConnectMethod | null>(null)
-  const [csvFile, setCsvFile] = useState<{ name: string; path?: string }[]>([])
+  const [csvFile, setCsvFile] = useState<{ name: string; path?: string; content?: string }[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [dbConfig, setDbConfig] = useState<DbConfig | null>(null)
@@ -836,7 +846,12 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete, onCl
                       return ['csv', 'xlsx', 'xls', 'json'].includes(ext || '')
                     })
                     if (validFiles.length > 0) {
-                      setCsvFile(prev => [...prev, ...validFiles.map(f => ({ name: f.name }))])
+                      // 读取每个文件的内容，存入 state
+                      validFiles.forEach(f => {
+                        readFileContent(f).then(content => {
+                          setCsvFile(prev => [...prev, { name: f.name, path: (f as any).path, content }])
+                        })
+                      })
                     }
                   }}
                   className={`relative border-2 border-dashed rounded-2xl p-10 text-center transition-all cursor-pointer ${
@@ -855,13 +870,20 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete, onCl
                       })
                       if (result) {
                         const filePaths = Array.isArray(result) ? result : [result]
-                        const validFiles = filePaths.filter(p => p).map(p => ({
-                          name: (p as string).split(/[\\/]/).pop() || p as string,
-                          path: p as string,
-                        }))
-                        if (validFiles.length > 0) {
-                          setCsvFile(prev => [...prev, ...validFiles])
-                        }
+                        const validPaths = filePaths.filter(p => p) as string[]
+                        // 通过 fetch 读取文件内容（Electron 中 file:// 路径可直接 fetch）
+                        validPaths.forEach(filePath => {
+                          const fileName = filePath.split(/[\\/]/).pop() || filePath
+                          fetch(`file://${filePath}`)
+                            .then(r => r.text())
+                            .then(content => {
+                              setCsvFile(prev => [...prev, { name: fileName, path: filePath, content }])
+                            })
+                            .catch(() => {
+                              // fetch 失败时只记录文件名
+                              setCsvFile(prev => [...prev, { name: fileName, path: filePath }])
+                            })
+                        })
                       }
                     } else {
                       fileInputRef.current?.click()
@@ -917,7 +939,11 @@ export const OnboardingFlow: React.FC<OnboardingFlowProps> = ({ onComplete, onCl
                           return ['csv', 'xlsx', 'xls', 'json'].includes(ext || '')
                         })
                         if (validFiles.length > 0) {
-                          setCsvFile(prev => [...prev, ...validFiles.map(f => ({ name: f.name }))])
+                          validFiles.forEach(f => {
+                            readFileContent(f).then(content => {
+                              setCsvFile(prev => [...prev, { name: f.name, path: (f as any).path, content }])
+                            })
+                          })
                         }
                       }
                     }}
